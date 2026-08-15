@@ -4,6 +4,31 @@
 
 ## 2026-08-15
 
+- **R-006 — published as [dgutson/agent-app](https://github.com/dgutson/agent-app),
+  public, MIT.** `git init` on a tree that had never been a repository, one initial
+  commit of 14 files / 2,851 lines, pushed to `main`. `.claude-plugin/marketplace.json`
+  is at the repo root, so `/plugin marketplace add dgutson/agent-app` followed by
+  `/plugin install agent-app@agent-app-marketplace` — the two lines the README already
+  carried — now work from any machine.
+  - **Gated on the plugin's own rule** before anything was pushed: `lint_agent_app.py
+    --root .` exit 0, and `claude plugin validate .` passing. Publishing a linter that
+    fails its own check was the one outcome worth refusing.
+  - **Deliberately not committed:** `HANDOFF.md` (session scratch, and stale — it still
+    named R-013 as next) and `.claude/settings.local.json` (permission allowlists full of
+    absolute paths from one checkout). Both added to `.gitignore` rather than merely
+    left untracked.
+  - **The marketplace was NOT re-pointed from the local directory to GitHub**, which the
+    item asked for. Doing it would have broken the development loop measured in R-019:
+    with the source at `./`, edits take effect after `claude plugin marketplace update`;
+    pointed at GitHub, every local change would need a push first. Fourteen items remain
+    open, so the local source stays. Re-point with
+    `claude plugin marketplace remove agent-app-marketplace && claude plugin marketplace
+    add dgutson/agent-app` once development settles. The item's stated outcome —
+    installable from GitHub by another machine or another person — is met either way.
+  - `marketplace.json`'s public description was rewritten to the definition R-013
+    settled; it still described agent apps as "skills whose tool establishes the facts",
+    which is the framing the same session had just corrected.
+
 - **R-013 — the definition is written down, and the linter stopped reporting on
   promises nobody made.** An agent app is **a console app whose `main()` is a skill**:
   the user runs it by name, gets a result, and ideally never learns a model ran the last

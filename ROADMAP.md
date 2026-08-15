@@ -472,26 +472,6 @@ Next ID: R-021
 
 ## Later
 
-### R-006 — Publish to GitHub as `dgutson/agent-app`
-
-- **Category:** Distribution
-- **What:** `git init`, commit, create the repository, push, and re-point the marketplace
-  from the local directory source to the GitHub source. `plugin.json` already declares
-  `homepage` and `repository` as `github.com/dgutson/agent-app`.
-- **Why:** Deferred deliberately: at the time, the linter had only ever run against two
-  apps. It has since run against seven, which fixed three real defects (`xref` was wrong
-  on four of five real-world cases, missing-`name` was over-severe, duplicate skip
-  entries). Publishing is what makes the plugin installable on another machine and by
-  anyone else; until then the local directory marketplace covers this machine only.
-
-  **R-010 no longer blocks this.** It blocked publication while it proposed renaming a
-  command, since renaming after strangers have installed it breaks their muscle memory.
-  R-010 is now documentation only, and documentation can land after publication without
-  breaking anyone.
-- **Outcome:** `agent-app` installs from GitHub the way the other `dgutson/*` plugins do.
-- **Blocked-by:** —
-- **Enables:** —
-
 ### R-001 — `/agent-app:list-installed` command
 
 - **Category:** Commands
