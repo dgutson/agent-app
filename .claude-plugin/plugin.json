@@ -1,0 +1,15 @@
+{
+  "name": "agent-app",
+  "description": "Build skills whose SKILL.md is the program and whose bundled tool is the library: the script establishes every fact that is mechanically establishable, and the prose supplies only the judgment a script cannot. Partitions the work, designs the tool's evidence contract, and lints the seam between the two halves so a field the tool learns to emit cannot be silently ignored by the prose that was supposed to read it.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Daniel Gutson"
+  },
+  "homepage": "https://github.com/dgutson/agent-app",
+  "repository": "https://github.com/dgutson/agent-app",
+  "license": "MIT",
+  "keywords": [
+    "skill", "plugin", "agent", "skill-authoring", "lint",
+    "cli", "evidence", "partition", "drift", "meta"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "agent-app-marketplace",
+  "description": "Marketplace hosting the agent-app plugin.",
+  "owner": {
+    "name": "Daniel Gutson",
+    "url": "https://github.com/dgutson"
+  },
+  "plugins": [
+    {
+      "name": "agent-app",
+      "source": "./",
+      "description": "Build and maintain agent apps: console apps whose main() is a skill. Partitions the work between script and prose, designs the evidence contract, and lints the seam where the two drift apart."
+    }
+  ]
+}

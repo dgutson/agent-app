@@ -1,0 +1,18 @@
+# Identifiers whose treatment is a decision somebody has already made.
+#
+# Two kinds live here, and both are the same act: recording that somebody
+# looked. A line with no reason after the # is a decision nobody has made yet.
+
+# --- emitted by the tool, not taught by the prose ---
+
+headings  # internal: parsed heading list on Prose, never serialised
+tokens    # internal: backticked-token index on Prose, never serialised
+
+# --- cited by the prose, not owned by this tool ---
+# The skill teaches by example, and its examples come from deptool
+# (github.com/dgutson/update-tools), the reference agent app.
+
+not_located         # deptool: symbols the header diff could not find at either version
+headers_read        # deptool: how much of the header budget the diff actually spent
+behind_by_is_floor  # deptool: "at least N releases behind", not an exact count
+--force             # deptool: profile --force, the flag that discards judgment prose

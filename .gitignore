@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/
+
+# Machine-local: permission allowlists carry absolute paths from one checkout.
+.claude/settings.local.json
+
+# Session scratch written by the handoff plugin, removed by /handoff:finish.
+HANDOFF.md
