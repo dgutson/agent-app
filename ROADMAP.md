@@ -458,13 +458,15 @@ Next ID: R-021
   - HISTORY.md records what shipped, since removal from ROADMAP.md is what "done" means
     here and a release with no HISTORY line loses that.
 
-  Decide whether that residue is a command, a `commands/release.md` checklist, or three
-  lines folded into R-006.
+  Decide whether that residue is a command or a `commands/release.md` checklist. Folding
+  it into R-006 is no longer an option: R-006 shipped on 2026-08-15 (see HISTORY.md).
 - **Why:** Asked as "commit and push", the answer is no — and saying so is worth more
   than building it, since this plugin's whole doctrine is that an agent app wrapped
   around a complete tool is pure overhead. Asked as "do not publish a plugin whose own
-  linter fails", the answer is plausibly yes, and that gate has no home today: R-006
-  will push whatever is in the tree at the time.
+  linter fails", the answer is plausibly yes, and that gate still has no home. It was
+  applied by hand for the first publication — lint clean and `claude plugin validate`
+  passing before the initial push — which is exactly the kind of discipline that holds
+  once and then quietly stops holding. Every release after this one is unguarded.
 - **Outcome:** A written decision naming which of commit/push, validate/tag, and the
   lint-clean gate this plugin owns — and, for whatever it does own, where that lives.
 - **Blocked-by:** —
