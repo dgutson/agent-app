@@ -4,6 +4,41 @@
 
 ## 2026-08-15
 
+- **R-021 — the README stops arguing and starts explaining.** 259 lines down to 212: the
+  concept, the three relations, how an app is invoked, and how to run the commands and the
+  linter. Added, implemented and retired in one session at the user's request.
+  - **Indistinguishability is now stated, not implied.** "From the outside it is
+    indistinguishable from any other program on the system" — invocation, output, exit
+    status and pipeability reveal nothing about whether the last step was Python or
+    judgment. The old text only gestured at it with "ideally you never find out".
+  - **Skill / plugin / agent app is now about the relations**, on the user's instruction
+    that nobody asked a question: the table's third column is *how it relates* rather than
+    *question it answers*, and the containment is spelled out in both directions — an app
+    is usually implemented as a plugin and almost no plugin is one; an app's `main()` is a
+    skill and almost no skill is any app's `main()`.
+  - **The three commands are one numbered workflow** in the order an app meets them, with
+    the comparison table demoted to a four-row summary beneath it.
+  - **Cut:** both sample console outputs, the trimmed-report example, the `skillOverrides`
+    reasoning behind *The fourth entry is not a command* (heading kept — R-010 cites it),
+    and the tier table, which became three lines of prose. **Kept:** the rule-code table,
+    the flag table and the exit codes, since those are usage rather than argument.
+  - **Added on the user's follow-up, after the cut:** that an agent app is invoked **both
+    interactively at a terminal and non-interactively from a script** — bash, a Makefile
+    rule, a git hook, cron, a CI step — with an honest note on where that stands today,
+    since R-014 is unbuilt: interactively it is a slash command, headless it is
+    `claude -p "/agent-app:lint"`, which runs but exits 0 for any completed session, so
+    nothing can branch on the verdict yet. `lint_agent_app.py` is named as the half that
+    already works from a script today, having no model in it. Also stated plainly that
+    **`agent-app` is itself an agent app, one whose subject is building agent apps** —
+    true of the pre-rewrite README as an aside about implementation, and lost to an aside
+    again in the first draft of this one.
+  - **Not the "roughly half" the item claimed** — 18% shorter, not 50%, and the follow-up
+    additions account for part of that. What survived the cut was concept or usage, which
+    is what the item asked to keep, so the rest of the reduction would have had to come
+    out of content the user wanted.
+  - README.md is not read by the linter — it reads `SKILL.md` and `commands/*.md` only —
+    so nothing here could break the self-lint, and the plugin still lints clean.
+
 - **R-006 — published as [dgutson/agent-app](https://github.com/dgutson/agent-app),
   public, MIT.** `git init` on a tree that had never been a repository, one initial
   commit of 14 files / 2,851 lines, pushed to `main`. `.claude-plugin/marketplace.json`
