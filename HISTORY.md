@@ -2,6 +2,66 @@
 
 > Completed roadmap items, newest first.
 
+## 2026-08-16
+
+- **R-014 — agent apps run from a shell.** An executable file whose first line is
+  `#!/usr/bin/env agent-app-launcher` and whose body is a short YAML document naming an
+  installed app is now a program: `./agent-app.ag lint --root .` runs the app headless,
+  prints only its output, and exits on what it concluded. The launcher is **external to
+  the plugin**, in `launcher/` — 270 lines of Python 3 plus PyYAML, a 190-line format
+  spec, and a hello-world example. Nothing in `skills/`, `commands/` or `scripts/` was
+  touched, on the user's instruction.
+  - **`claude -p` cannot carry a verdict, measured rather than assumed:** a run told to
+    report a failed check answered `FAILED: 3 errors found.` and exited **0**. It exits
+    1 only on its own usage errors. So the launcher owns the exit status, obtaining a
+    verdict through `--json-schema` — which makes the harness enforce the shape instead
+    of trusting prose to remember it — and maps it: `0` ok, `1` findings, `2` usage,
+    `3` refused, `4` error, `5` no verdict. **The mapping is fixed, never per-app
+    configurable**, because `$?` has to mean the same thing across every agent app.
+  - **`--help` starts no model at all.** Exit 0 in **0.05s**; `strace -e trace=execve`
+    shows only `hello.ag → agent-app-launcher → python3`, and it answers identically
+    with `claude` removed from `PATH`. This is the plugin's own partition rule applied
+    to its launcher: a determinable fact is not worth a model.
+  - **Resolve, don't restate.** The `.ag` file names an app and never copies its
+    declarations — commands, usage lines and tool grants are read at run time from the
+    plugin's own `commands/*.md` frontmatter. So there is one declaration and no copy
+    that could drift, which is this repository's whole subject, and an app written
+    before any of this existed gets a command line without changing a byte.
+  - **No `model:` key, and the reason generalises.** Measured: frontmatter
+    `model: claude-haiku-4-5-20251001` produced haiku in `modelUsage`; without the key,
+    the session default. The harness resolves it when the slash command is dispatched,
+    so an `.ag` key would not duplicate that declaration but **override** it. The
+    launcher therefore passes no `--model`. Recorded against R-018.
+  - **Rejected on principle:** a `permission-mode:` key or a general `claude-args:`
+    passthrough. It would make the `.ag` a second undocumented CLI surface, and a
+    committed `bypassPermissions` outlives whoever added it. `--allowed-tools` alone was
+    measured sufficient headless — 0 permission denials — and without it a headless run
+    cannot use `Bash` at all, so an app that shells out to its own tool does nothing.
+  - **`default-command` was added, removed, and re-added on the user's call.** Removing
+    it was on evidence: with a default declared, `./hello.ag shout` does not report an
+    unknown command, it runs `greet` with `shout` as the name — which contradicts this
+    repo's rule that a typo must never read as a clean run. It is back in, with the
+    trade-off stated in the spec rather than left to be discovered.
+  - **Not delivered, and carved out rather than quietly dropped:** the item also
+    required that every app `/agent-app:create` generates ships with this invocation.
+    `commands/create.md` is untouched, because nothing yet writes an `.ag` and teaching
+    the format inline would put a second copy of it in the plugin. **R-023 now owns that
+    half** and says so. Today exactly one `.ag` file exists.
+  - Also deferred with their reasons recorded: the embedded single-file form (R-022),
+    and the `cwd` / `args` / `max-cost` keys (**R-024**, new). The `version:`
+    forward-compatibility question went to **R-016**, because an installer is precisely
+    what makes version skew possible — while every copy of the launcher is one symlink
+    on one machine, it costs nothing to fix.
+  - **The launcher is extensionless on purpose:** `lint_agent_app.py`'s
+    `SOURCE_SUFFIXES` would otherwise collect it as first-party source and the plugin's
+    self-lint would stop being about the plugin. Still `3 entry points, 1 first-party
+    tool / clean`, exit 0.
+  - **Two things thrown away rather than shipped**, both worth the line: a first build
+    of ~600 lines placed the launcher *inside* the plugin and edited its SKILL.md — the
+    user rejected it and it was deleted; and a 545-line version was cut to 231 on a
+    challenge about size, with identical behaviour, by dropping wrapper classes, custom
+    exception types and four flags nobody had asked for.
+
 ## 2026-08-15
 
 - **R-021 — the README stops arguing and starts explaining.** 259 lines down to 212: the

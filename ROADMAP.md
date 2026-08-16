@@ -7,66 +7,64 @@
 > entries are no longer present in this file.
 
 Format: 1
-Next ID: R-022
+Next ID: R-025
 
 ---
 
 ## Now
 
-### R-014 — Agent apps run from a shell: the shebang, and the exit status behind it
+### R-023 — Generated apps ship an `.ag`, and `/agent-app:update-ag` writes it
 
-- **Category:** Invocation
-- **What:** Make an agent app executable. A file whose first line is
-  `#!/usr/bin/env agent-app-launcher` — body either the SKILL.md itself or a short
-  manifest naming an installed app — becomes a program, so that `roadmap --list` and
-  `ls -l` are the same kind of thing to the user and to a script. **Subsumes R-004**
-  (headless invocation), which was never a separable deliverable: see **Why**.
+- **Category:** Commands
+- **What:** A command that writes and maintains an app's `.ag` file instead of
+  leaving the user to author YAML by hand, **and the step in `commands/create.md`
+  that calls it.** It reads the app in the current directory (or `$1`), works out
+  what the file should say, and writes or updates it: `plugin:` for an installed
+  app versus `plugin-dir:` for one in the tree, whether a `default-command:` is
+  warranted, and a `timeout:` if the app's own runs justify one. On an existing
+  `.ag` it reconciles rather than clobbers — the file may carry comments and a
+  deliberately non-obvious timeout, and overwriting somebody's considered value
+  is the same overreach as `/agent-app:lint` rewriting the app it was asked to
+  report on.
 
-  Three parts, in this order, because each decides the next:
+  **This item carries the half of R-014 that R-014 did not deliver.** R-014
+  (delivered 2026-08-16 — see HISTORY.md) built the launcher and the format, but
+  its stated outcome also required that every app `/agent-app:create` generates
+  ships with that invocation, and `commands/create.md` was deliberately left
+  untouched because nothing existed to write the file. That is this item. The
+  eight-step workflow in `commands/create.md` gains a ninth step, and the ninth
+  step invokes this command rather than teaching the format inline — the format
+  is specified once, in `launcher/ag-format.md`.
 
-  1. **The result channel** — R-004's question, and the one that has to be answered in
-     writing before any launcher is written, since it *is* the launcher's exit path.
-     Establish whether `claude -p` can propagate a verdict as an exit status; if it
-     cannot, define the convention (a JSON verdict on stdout via `--output-format json`,
-     or a file the app writes), plus a documented `--max-turns` and timeout. Measured
-     previously: `claude -p "Reply with exactly: PONG"` returns in 4s with exit 0, and
-     `claude -p "/agent-app:lint"` in `update-tools` was still working at 180s when a
-     `timeout` killed it (SIGTERM, rc 143) — so the slash command resolves headless and
-     the delay is real judgment work, not a failure to dispatch. Do not conclude from
-     that timeout that headless invocation is broken; budget minutes, not seconds.
-  2. **The launcher.** Resolve the named app, map the command line onto its verbs, run
-     it headless, exit per (1). **stdout carries the app's output only** — no session
-     chatter — so it survives a pipe.
-  3. **The argument surface.** Which verbs exist and what flags they take has to be
-     *declared* — in frontmatter, or by the `commands/` names — not inferred from prose
-     at run time. `--help` must answer without invoking the model at all: it is a
-     determinable fact, so by this plugin's own partition rule the launcher owes it.
+  **Most of this is mechanical and belongs in a script**, which is this plugin's
+  own partition rule applied to itself: which key applies is decided by whether
+  the plugin resolves in `installed_plugins.json`, and validity is decided by
+  whether `commands/*.md` exists and parses. What is left for the prose is the
+  judgment — whether a `default-command` is a good idea for *this* app, given
+  that declaring one costs the unknown-command diagnostic.
 
-  **Whether the app has a tool half is irrelevant here.** A prose-only app gets a
-  command line exactly like a Python-backed one. The caller cannot tell, and that being
-  invisible is the whole point.
-- **Why:** This is the definition made executable. R-013 (delivered — see HISTORY.md)
-  settled that an agent app is a console app whose `main()` is a skill, but today that
-  `main()` can only be reached by typing a slash command into a REPL — which leaves the
-  claim aspirational and the user aware at every moment that something unusual is
-  happening. A shebang makes it literal: agent apps compose with pipes, `cron`,
-  Makefiles, git hooks and other programs, and stop being things you can only run inside
-  a chat. Today `claude -p` exits 0 for a completed session regardless of what the agent
-  concluded, so CI cannot gate on "the lint found errors" — while `lint_agent_app.py`
-  alone already exits 1 and is usable in CI now.
+  **Name it against R-015's rule before building it.** `update-yaml` names the
+  file format rather than the subject, and every other command in the plugin is
+  named for what it acts on. `update-ag` acts on the app you are standing in, so
+  it stays unsuffixed either way.
+- **Why:** The format is small — one required key out of four — but a
+  hand-written `.ag` is a file that can name a plugin that is not installed, a
+  `default-command` that is not a command, or a `plugin-dir` that does not
+  resolve, and every one of those is a run that fails at the shell rather than
+  at authoring time. The launcher already refuses all three, which means the
+  facts needed to write the file correctly are exactly the facts it already
+  computes; leaving the user to rediscover them by trial is the gap.
 
-  **Why R-004 is not a separate item.** It could otherwise be marked done with a
-  documented convention that nothing exercises, and a convention with no caller is a
-  guess — which is this plugin's own "unmeasured is not clean" rule turned on its
-  roadmap. The launcher is the first thing that must branch on that status, so it is
-  also the only thing that can show the answer was right. The dependency is total in one
-  direction (no launcher can exist without an exit status) and the standalone value in
-  the other is a strictly weaker version of the same goal: a hand-written
-  `claude -p "/roadmap:list"` invocation with a convention the user has to remember.
-- **Outcome:** `./some-app --verb` runs an agent app from a shell and from a script, its
-  exit status is branchable, `--help` answers with no model in the loop, and nothing in
-  the invocation reveals whether the app is implemented in prose or in Python. Each app
-  `/agent-app:create` generates ships with that invocation.
+  **It is also what stops the launcher having one user.** Today exactly one
+  `.ag` file exists — `launcher/examples/hello.ag` — and nothing generates
+  another, so the shell invocation is a demonstration rather than part of the
+  workflow. An app created tomorrow still comes out reachable only from a REPL,
+  which is the gap R-014 was supposed to close.
+- **Outcome:** `/agent-app:update-ag` writes a correct `.ag` for the app in
+  front of it, updates an existing one without discarding what its author chose,
+  and refuses with a reason when the app cannot be resolved. `/agent-app:create`
+  invokes it, so every generated app is executable from a shell without anyone
+  hand-writing YAML.
 - **Blocked-by:** —
 - **Enables:** —
 
@@ -222,12 +220,14 @@ Next ID: R-022
   demonstration that the rule is real: two commands whose names differ by scope, next to
   each other in the same completion list.
 
-  **Overlaps R-002 and R-014 part 3 deliberately, and must not fork from them.** R-002
-  makes each *generated* app answer `/<name>:help` about itself; R-014 makes the launcher
-  answer `--help` at the shell; this answers about whatever app you are standing in,
-  including apps that predate both and will never carry either. Three surfaces, one
-  source: the app's declared verbs. Whichever lands first owns that declaration, and the
-  others render it.
+  **Overlaps R-002 deliberately, and must not fork from it or from the launcher.**
+  R-014 landed first (see HISTORY.md) and settled where the declaration lives: a
+  command's own frontmatter — `description`, `argument-hint`, `allowed-tools` — read from
+  `commands/*.md` at run time, with no copy anywhere that could drift. So this is not a
+  new declaration, it is a third rendering of that one: the launcher answers `--help` at
+  the shell, R-002 answers `/<name>:help` inside a generated app's own session, and this
+  answers about whatever app you are standing in — including apps that predate both and
+  will never carry either.
 - **Outcome:** `/agent-app:list-cmds` prints the current app's commands with one line
   each, and the SKILL.md states the local/global naming rule that every command in the
   plugin can be checked against.
@@ -235,6 +235,82 @@ Next ID: R-022
 - **Enables:** —
 
 ## Next
+
+### R-024 — Three deferred `.ag` keys: `cwd`, `args`, `max-cost`
+
+- **Category:** Invocation
+- **What:** Decide, one at a time and each on its own merits, whether the format
+  grows any of the three keys R-014 left open. Adding a key is cheap; adding one
+  that turns out to be wrong is a key that can never be removed, so the default
+  answer is no and each has to earn its place.
+  - **`cwd:`** — the strongest case of the three, because it names a real
+    inconsistency that exists today rather than a convenience. `plugin-dir`
+    resolves relative to the `.ag` file, but the session itself runs in the
+    caller's working directory, so a committed `check.ag` does one thing from
+    the repository root and another from a subdirectory. Settle whether the fix
+    is a key, or simply making the launcher run in the `.ag` file's directory
+    always — which is what a user probably expects and needs no key at all.
+  - **`args:`** — arguments passed on every invocation, e.g. `[--root, .]`. The
+    open question is not whether it works but where they land: prepended to the
+    user's arguments or appended, and what happens when the user passes the same
+    flag. Note that a wrong answer here is silent, which is the argument for
+    leaving it out.
+  - **`max-cost:`** — maps to `--max-budget-usd`. Measured during R-014: there
+    is **no `--max-turns`** in this CLI, so wall clock and dollars are the only
+    two bounds that exist, and the file already carries `timeout`. That makes
+    this the natural sibling of a key that is already there.
+- **Why:** All three were raised while the format was being written and none was
+  needed to make it work, so shipping them would have been speculative. They are
+  recorded here rather than in the format spec because an undecided key is not a
+  feature of the format — but the reasoning behind each is worth exactly one
+  session's thought and would otherwise be re-derived from scratch.
+
+  **Sequencing:** none of these blocks anything, and each is additive. The one
+  scheduling constraint is that adding *any* of them to a launcher that has been
+  distributed is what makes the forward-compatibility question in R-016 real —
+  so if R-016 lands first, that is where the `version:` answer comes from, and
+  these three inherit it.
+- **Outcome:** A written yes or no for each of the three, with the reason, and
+  `launcher/ag-format.md` documenting whichever ones survive.
+- **Blocked-by:** —
+- **Enables:** —
+
+### R-022 — The embedded form: an `.ag` file that carries its own skill
+
+- **Category:** Invocation
+- **What:** A second body form for `.ag` files, in which the file **is** the app
+  rather than naming one: the prose lives in the YAML (a block scalar), so a
+  whole agent app is one executable file with no plugin, no `commands/`
+  directory and nothing to install. The launcher would pass that prose as the
+  session's instructions instead of resolving a slash command.
+
+  Prototyped during R-014 and deliberately cut from it. Two things it needs that
+  the naming form gets for free, and they are the work:
+  - **Where the command surface is declared.** There is no `commands/*.md` to
+    read, so the file has to carry its own commands, their usage lines and their
+    tool grants — which is the duplication the naming form exists to avoid, but
+    here there is nothing to duplicate *from*, so it is the single declaration.
+  - **How the prose reaches the session.** Measured during R-014:
+    `--append-system-prompt` takes the text on the command line and there is no
+    `--append-system-prompt-file`, so a large skill goes through argv. Settle
+    whether that is acceptable or whether the launcher should materialise a
+    throwaway plugin directory and use `--plugin-dir`, which was measured to
+    work.
+- **Why:** The naming form assumes an app worth installing. A one-file app is a
+  different use case: a script-sized thing somebody writes, commits next to the
+  code it serves, and runs — where standing up a plugin directory for a
+  fifteen-line skill is more ceremony than the app is. It is also the sharpest
+  demonstration the format has, since the file is then the entire program.
+
+  **Not urgent, and separable on purpose.** The naming form covers every
+  installed app, which is what R-014 needed; this adds a use case rather than
+  completing one, and building both at once was what made the first launcher
+  twice the size it needed to be.
+- **Outcome:** An executable `.ag` file containing its own skill runs, answers
+  `--help` from its own declaration with no model, and exits on the same status
+  convention as the naming form.
+- **Blocked-by:** —
+- **Enables:** —
 
 ### R-009 — Linter check: a reporting command must not hold write grants
 
@@ -271,9 +347,10 @@ Next ID: R-022
   how a finding reaches a pull request as an annotation instead of a log line somebody
   has to scroll past. It also forces a decision the console dodges: a finding with a
   `null` line or column needs a stated mapping, because inventing a position to satisfy
-  the schema is the exact defect this linter reports in other people's tools. R-014 wants
-  a CI story for agent apps; this is the half of it that does not wait on `claude -p`
-  learning to propagate a verdict.
+  the schema is the exact defect this linter reports in other people's tools. R-014
+  delivered the other half of the CI story — an agent app now exits on its verdict — so
+  this is what turns a passing or failing run into annotations a reviewer sees, rather
+  than a status code and a log nobody opens.
 - **Outcome:** `lint_agent_app.py --format sarif` produces a file GitHub's code-scanning
   upload accepts, each finding carrying its `AAxxx` as `ruleId`, and unrun or partial
   checks appearing as notifications rather than silently not existing.
@@ -291,13 +368,14 @@ Next ID: R-022
   one has to read the plugin's README or its SKILL.md to find out what they can invoke.
   The plugin's own three commands are already past the point where that is obvious.
 
-  **Overlaps R-014 and R-015 deliberately, and must not fork from either.** R-014 makes
-  the launcher answer `--help` at the shell from the app's declared verbs, with no model
-  in the loop; R-015 answers about whatever app the user is standing in; this is the same
-  list surfaced inside a generated app's own session as `/<name>:help`. Three surfaces,
-  one source — whichever lands first owns the declaration and the others render it, so if
-  R-014 goes first this becomes "render the declared verbs as a command" rather than
-  "write a help file", and the linter check moves to *declared verbs exist*.
+  **Overlaps R-015 deliberately, and must not fork from it or from the launcher.** R-014
+  went first (see HISTORY.md), so the conditional this item used to carry has resolved:
+  the declaration is a command's own frontmatter, read from `commands/*.md` at run time,
+  and the launcher already renders it as `--help` at the shell with no model in the loop.
+  This item is therefore **render that declared surface as a command**, not "write a help
+  file" — and the linter check is that the declaration is complete rather than that a
+  `help.md` exists. A command with no `description`, or one taking arguments with no
+  `argument-hint`, renders as a blank in all three surfaces at once.
 - **Outcome:** Every generated app answers `/<name>:help` with its own command list, and
   the linter reports an app that has commands but no `help`.
 - **Blocked-by:** —
@@ -325,10 +403,11 @@ Next ID: R-022
 - **Category:** Scaffolding
 - **What:** **Decide first, build second — the deliverable may legitimately be "no".**
   The question: should `/agent-app:create` emit an installer for the app it generates,
-  and should this plugin ship one for itself? Once R-014 lands, `agent-app` stops being
-  a thing you only install through `/plugin install`: it puts `agent-app-launcher`
-  somewhere on `PATH`, which is a change to the user's system and not to their Claude
-  Code configuration. Points to settle:
+  and should this plugin ship one for itself? R-014 (delivered — see HISTORY.md) already
+  stopped `agent-app` being a thing you only install through `/plugin install`: it now
+  has a launcher that has to be on `PATH`, which is a change to the user's system and not
+  to their Claude Code configuration. Today that is a hand-run `ln -s`, documented in
+  `launcher/ag-format.md`. Points to settle:
   - **What an installer is allowed to touch**, and what it must ask before touching.
     `PATH` entries, a shell rc file, a completion script (R-017), a symlink per app.
   - **Where things go.** `~/.local/bin` versus a system prefix; per-user by default,
@@ -340,16 +419,27 @@ Next ID: R-022
     its result is a change to the user's system rather than an answer to their question.
     Say so in whatever gets generated, or `/agent-app:list-installed` will end up
     counting installers.
-- **Why:** R-014 turns this plugin into something with a footprint outside Claude Code,
-  and a launcher nobody can install is a launcher nobody runs. Doing it by hand-written
-  README instructions is how installations end up half-done and unremovable. Whether
-  *generated* apps need the same machinery is the genuinely open half: most will not, and
-  emitting an installer for an app that only ships a skill would be scaffolding nobody
-  asked for.
+  - **Settle `version:` in the `.ag` format here, before anything ships a launcher.**
+    Unknown keys are a hard error by design — a silently dropped typo is a launcher
+    running something other than what the file says — so the first `.ag` file written
+    against a newer launcher fails on an older one with `unknown key: cwd`, which reads
+    as a typo rather than as *this file wants a newer launcher*. That costs nothing to
+    fix while every copy of the launcher is one symlink on one machine, and cannot be
+    fixed painlessly afterwards: adding `version:` later does not help, because the old
+    launcher rejects `version:` itself as unknown. **An installer is precisely the thing
+    that makes version skew possible**, which is why the decision belongs to this item
+    and not to R-024. Reserving it is small — accept the key, require `1`, and fail on
+    anything higher with a message naming the launcher as the old half.
+- **Why:** R-014 gave this plugin a footprint outside Claude Code, and a launcher nobody
+  can install is a launcher nobody runs. Doing it by hand-written README instructions is
+  how installations end up half-done and unremovable. Whether *generated* apps need the
+  same machinery is the genuinely open half: most will not, and emitting an installer for
+  an app that only ships a skill would be scaffolding nobody asked for.
 - **Outcome:** A written decision on whether generated apps get installers and on what an
   installer may do unasked — and, if the answer is yes, `agent-app` itself installs,
-  verifies and uninstalls its launcher without leaving anything behind.
-- **Blocked-by:** R-014
+  verifies and uninstalls its launcher without leaving anything behind. Either way the
+  `.ag` format has an answer on `version:` before a second machine has a launcher.
+- **Blocked-by:** —
 - **Enables:** R-017
 
 ### R-017 — Shell completion for the launcher, bash at minimum
@@ -358,19 +448,21 @@ Next ID: R-022
 - **What:** Make `agent-app-launcher` and the apps it fronts complete at the terminal:
   app names, then that app's verbs, then that verb's flags. Bash is the floor; zsh and
   fish if they come cheaply from the same declaration. The completion script is generated
-  from the **declared** verb surface R-014 part 3 establishes — never by running the app,
-  and never by parsing prose, since completion has to answer in milliseconds with no
-  model anywhere near it. R-016's installer is what puts the script where the shell will
-  read it.
+  from the **declared** verb surface R-014 established — the `description` and
+  `argument-hint` in each `commands/*.md` — never by running the app, and never by
+  parsing prose, since completion has to answer in milliseconds with no model anywhere
+  near it. The launcher already reads exactly that to render `--help` in 0.05s without
+  looking up `claude`, so the mechanism is proven and the work is emitting the script.
+  R-016's installer is what puts it where the shell will read it.
 - **Why:** The claim R-013 settled is that an agent app is a console app whose `main()`
-  is a skill, and R-014 makes that literal at the prompt. Completion is the part of "it
+  is a skill, and R-014 made that literal at the prompt. Completion is the part of "it
   behaves like `ls`" that users actually feel: a program you must remember the verbs of
-  is a program that reads as unfinished, however well it runs. It is also a forcing
-  function on R-014's declaration — a verb surface that cannot generate a completion
-  script was never really declared.
+  is a program that reads as unfinished, however well it runs. It is also a second
+  consumer of that declaration, which is the check on whether it was really a declaration
+  — a verb surface that cannot generate a completion script was never one.
 - **Outcome:** Typing an agent app's name and pressing Tab completes its verbs, and the
   completion script is generated from the same declaration `--help` renders.
-- **Blocked-by:** R-014
+- **Blocked-by:** —
 - **Enables:** —
 
 ### R-018 — Tune the reasoning effort each command asks for
@@ -385,6 +477,16 @@ Next ID: R-022
      read how it ended up doing it, and do not re-derive the mechanism.** Do not
      investigate before that work lands; reading it mid-change is how two sessions
      produce two different answers.
+
+     **One measurement from R-014 that bears on this, and was not extended into effort
+     on purpose.** A command's frontmatter `model:` is already honoured by the harness:
+     `model: claude-haiku-4-5-20251001` in a command file produced haiku in `modelUsage`,
+     and the same command without the key produced the session default. So per-command
+     declarations of *how a command runs* already work through frontmatter, which is the
+     shape `effort:` would most likely take — and it is why the launcher deliberately
+     passes no `--model`, since doing so would override the command's own declaration.
+     Effort itself was not probed, because this item says the parallel session owns that
+     mechanism.
   2. **Which effort each command actually needs.** `lint` relays a script's findings and
      should be cheap; `partition` reads both halves and argues about a design, and
      starving it produces a review that manufactures findings to look thorough — the

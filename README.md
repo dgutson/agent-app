@@ -14,12 +14,16 @@ script, a Makefile rule, a git hook, a cron job, a CI step — with nobody in th
 loop to read a transcript. The caller passes arguments, reads stdout and branches
 on the exit status, exactly as it would with any other program.
 
-**Where that stands today:** interactive invocation is a slash command in a
-Claude Code session; scripted invocation is `claude -p "/agent-app:lint"`, which
-does run headless — but it exits 0 for any completed session, so a script can run
-an app without yet being able to branch on what it concluded. Closing that gap —
-a `#!/usr/bin/env agent-app-launcher` shebang and a real exit status — is the
-next item on the [roadmap](ROADMAP.md).
+**Where that stands today:** both work. Interactively an agent app is a slash
+command in a Claude Code session. From a script it is an executable file — a
+`#!/usr/bin/env agent-app-launcher` shebang over a short YAML body naming the
+app — which resolves the app, runs it headless, and exits on what it concluded:
+`0` clean, `1` findings, `2` usage, `3` refused, `4` failed, `5` no verdict.
+`claude -p` cannot do that last part on its own, since it exits 0 for any
+session that completed whatever the session decided, so the launcher owns the
+status. `--help` is answered from the app's own declaration with no model
+started at all. See [the `.ag` format](launcher/ag-format.md) — though until
+there is an installer, the launcher needs one symlink onto `PATH`.
 
 Most agent apps have two halves. The bundled tool establishes every fact that is
 mechanically establishable; the prose supplies the one thing a script cannot —
