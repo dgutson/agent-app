@@ -72,7 +72,7 @@ file says.
 | `description` | one line | The summary shown under `usage:` in `--help`. Falls back to the plugin manifest's `description`, which is often a paragraph written to sell the plugin rather than to explain the command. |
 | `epilog` | free text | Printed after the command list. Replaces the default note about where launcher options bind. Use it for the one thing a user of *this* app should know before running it. |
 
-### `default-command` and mistyped commands
+### `default-command`, mistyped commands, and flags
 
 With a default declared, an unrecognised first argument is treated as an
 argument to the default rather than as a bad command. Measured on `hello.ag`:
@@ -80,6 +80,25 @@ argument to the default rather than as a bad command. Measured on `hello.ag`:
 `shout` as the name. For a one-command app that is exactly what you want, since
 there is nothing to mistype *into*. For an app with several commands it means
 giving up the unknown-command diagnostic, so declare it deliberately.
+
+**The same trade extends to flags.** An app whose interface is options rather
+than positionals — `report --output x --format json` — needs to be reachable
+without naming its command, so with a default declared, the first flag the
+launcher does not itself define begins the app's arguments:
+
+```console
+$ ./report.ag --output x --format json      # runs: report --output x --format json
+$ ./report.ag --timeout 300 --output x      # --timeout is the launcher's; --output is not
+```
+
+The launcher's own options still bind first and still win, which is the cost:
+with no command named, an app flag spelled like a launcher flag (`--timeout`,
+`--dry-run`) is taken by the launcher. Name the command — `./report.ag report
+--timeout 5` — and every argument after it belongs to the app again, as always.
+
+**Without a `default-command`, none of this applies** and an unknown leading
+flag is a usage error, as before. This is opt-in for the same reason the
+mistyped-command behaviour is.
 
 ## The command line
 

@@ -130,6 +130,30 @@ def installed(name):
     return Path(plugins[hits[0]][0]["installPath"])
 
 
+def app_args(cli, argv, default):
+    """Where the launcher's own options stop and the app's arguments begin.
+
+    With no command named, a leading `--flag` the launcher does not define is
+    an argparse error, so an app whose interface is flags — `report --output
+    x` — could not be reached through its default at all. A declared
+    `default-command` already trades the unknown-command diagnostic for
+    `./app.ag <arg>`; this extends that same opt-in trade to `./app.ag
+    --flag`, by naming the default explicitly before handing the rest over.
+
+    The launcher's option strings are read off the parser rather than listed
+    here, so the split cannot disagree with the options that exist.
+    """
+    if not default:
+        return argv
+    i = 0
+    while i < len(argv) and argv[i].startswith("-"):
+        action = cli._option_string_actions.get(argv[i].split("=", 1)[0])
+        if action is None:
+            return [*argv[:i], default, *argv[i:]]
+        i += 1 if action.nargs == 0 or "=" in argv[i] else 2
+    return argv
+
+
 def main(argv):
     if not argv:
         die(f"usage: {PROG} <app.ag> [--help] <command> [args...]")
@@ -202,7 +226,7 @@ def main(argv):
     cli.add_argument("command", nargs="?", help="one of the commands below")
     cli.add_argument("args", nargs=argparse.REMAINDER,
                      help="passed to the app untouched")
-    opts = cli.parse_args(argv[1:])
+    opts = cli.parse_args(app_args(cli, argv[1:], default))
     args = [a for a in opts.args if a not in ("--help", "-h")]
     want_help = opts.help or len(args) != len(opts.args)
 

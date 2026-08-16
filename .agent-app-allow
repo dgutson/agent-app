@@ -16,3 +16,11 @@ not_located         # deptool: symbols the header diff could not find at either 
 headers_read        # deptool: how much of the header budget the diff actually spent
 behind_by_is_floor  # deptool: "at least N releases behind", not an exact count
 --force             # deptool: profile --force, the flag that discards judgment prose
+
+# The `/agent-app:create` workflow teaches interrogating a brief by working one
+# through. The brief is for an app called diagnose-logs, which does not exist and
+# is not meant to; these are its flags, quoted, not this plugin's.
+
+--output            # diagnose-logs: the example brief's output flag
+--format            # diagnose-logs: the example brief's txt/json flag, and the
+                    # partition lesson — JSON a model emits is a fact re-derived

@@ -4,6 +4,55 @@
 
 ## 2026-08-16
 
+- **`/agent-app:create` now finishes with a directory, and asks before it builds.**
+  Not a roadmap item — the user pointed out that `create` was producing a design rather
+  than an app, and that the brief it is handed is never a specification. Two gaps were
+  real and both are closed.
+  - **It never created `.claude-plugin/plugin.json`, and never stated a layout.** No step
+    mentioned the manifest, so an app built by following the workflow literally was not
+    an installable plugin; and the file said *"the layout is not the design"*, which was
+    true about emphasis and slid into never saying what the layout is. `scripts/scaffold_app.py`
+    (137 lines) now writes the manifest and reports the files that remain with what each
+    needs — layout is a **must-be-identical** fact, which by this plugin's own rule puts
+    it in a script rather than in prose the model re-reads each time. It validates the
+    name as a plugin slug, never overwrites an existing manifest, and re-runs as a
+    completeness check (`ready` / `incomplete` / `cannot-scaffold`).
+  - **Interrogation is now step 1**, with the policy in the SKILL.md rather than a bare
+    instruction: separate the gaps you may close yourself from the ones that change what
+    gets built, ask the second kind in one message, and state every assumption you made
+    for the rest. Worked through on the user's own brief, which is now the teaching
+    example. **Running headless, it refuses and puts the questions in the output** — the
+    launcher's protocol already forbids asking, and guessing would build to a
+    specification nobody wrote.
+  - **A leading flag now reaches the app.** `./diagnose-logs.ag --output x --format json`
+    was an argparse usage error, because launcher options bind before the command and
+    `--output` is not one — so an app whose interface is flags could not be reached
+    through its default at all. With a `default-command` declared, the first flag the
+    launcher does not itself define now begins the app's arguments. **The same opt-in
+    trade `default-command` already makes**, extended from a mistyped verb to a mistyped
+    flag; without a default, an unknown leading flag is still a usage error. The split
+    reads the parser's own option strings, so it cannot disagree with the options that
+    exist.
+  - **Measured on the user's example, built end to end.** `diagnose-logs` — scaffolded,
+    written, given an `.ag` by `update-ag`, `claude plugin validate` passing — ran as
+    `./diagnose-logs.ag --output report.txt --format txt`, wrote a real report and exited
+    **1**, correctly: it found things. It also declared `dmesg` unavailable
+    (`kernel.dmesg_restrict`) instead of reporting a clean kernel log, which is the
+    honesty rule doing its job.
+  - **The linter caught the demo committing the exact error the new prose warns about.**
+    `diagnose-logs`' command cited `--output` and `--format` while its script implemented
+    neither — the model was doing the serialising, which is the mis-partition step 1 now
+    tells you to raise at the start. Reported as two `AA201`s on the generated app. Left
+    unfixed there, because the finding is worth more than the demo.
+  - Two `AA201`s on *this* plugin, from quoting that example's flags, went to
+    `.agent-app-allow` with reasons — the case the check's own docstring anticipates
+    ("another app's field names quoted as an example"), and the same treatment `--force`
+    already had. Self-lint: `4 entry points, 3 first-party tools`, every check ran, exit 0.
+  - **Left open as R-025:** an app's *flags* are still not declared anywhere —
+    `argument-hint` is free text the launcher passes through blind. R-014's claim that the
+    argument surface is declared holds for commands and not for their options, which is
+    also why R-017 can complete verbs but not flags.
+
 - **R-023 — nobody hand-writes the `.ag` file, and generated apps get one.**
   `/agent-app:update-ag` (54 lines of prose over `scripts/update_ag.py`, 409 lines)
   works out what an app's `.ag` should say and writes it. `commands/create.md` gained a

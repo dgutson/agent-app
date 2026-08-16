@@ -347,14 +347,57 @@ silently.
 ### `/agent-app:create` — build a new one
 
 Do not scaffold first. The layout is the easy part and getting it right early
-is worth nothing; the partition is the whole design.
+is worth nothing; the partition is the whole design. But *finish* with a
+directory that installs and runs — a create that hands back a design has done
+the interesting half and left the user the rest.
 
-1. **Establish the question the app answers**, then run the three cuts on it
-   before agreeing to build anything. Is there something the user will invoke
-   by name, or are they describing standing guidance? Is the result theirs, or
-   is it a change to their harness? Is the last step judgment, or is it
-   computable — in which case say so and offer them a plain CLI, which is
-   cheaper to build, cheaper to run, and testable.
+**A brief is a starting position, never a specification.** The user describes
+what they pictured; what decides the build is what they did not picture. So the
+first move is to ask, and the skill for it is separating the gaps that fork the
+design from the gaps you can simply close:
+
+> *"an app named `diagnose-logs` that grabs the latest dmesg and other logs and
+> shows a diagnostic of what is going on. It shall accept `--output file`, and
+> an optional `--format` supporting either txt or json."*
+
+Close these yourself and say that you did: output goes to stdout when `--output`
+is absent; `--format` defaults to txt. **Ask these, because the answers change
+what gets built:** which logs "other logs" means, and whether reading them needs
+root — that decides whether the tool can run unprivileged at all; what window to
+read, since "latest" is a boot for one user and an hour for another; and what
+the app should say when nothing is wrong, which is the difference between an app
+with an `ok` verdict and one that always finds something to report.
+
+Ask them in one message, not five. And notice that `--format json` is itself a
+partition question arriving in disguise: JSON emitted by a model is a fact being
+re-derived, so the script should serialise the fields the prose produces. Raise
+that at the start, where it is free.
+
+**When there is nobody to ask** — running headless, no user on the other end —
+refuse and put the questions in the output. Guessing produces an app built to a
+specification nobody wrote.
+
+The scaffold itself is mechanical and belongs in the tool, since two apps built
+a week apart should not disagree about where a skill lives:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/scaffold_app.py" --root <dir> --name <app> [--tool] --write
+```
+
+| Field | What it establishes |
+|---|---|
+| `manifest` | Where `plugin.json` goes. Without it the directory is not a plugin and cannot be installed, whatever else is in it. |
+| `created` | What this run made. An existing manifest is never overwritten — it is its author's, exactly as an existing `.ag` is. |
+| `missing` | The files no scaffold can write, each with its `kind` and what it `needs`. This is a checklist, not a diagnosis: re-run at any point for what is outstanding. |
+| `verdict` | `ready` when nothing is outstanding, `incomplete` while files remain, `cannot-scaffold` when the name cannot be a plugin. `incomplete` is the normal state for most of a create session, not a failure. |
+
+1. **Ask what the brief leaves open**, as above, before agreeing to build
+   anything. Then **establish the question the app answers** and run the three
+   cuts on it. Is there something the user will invoke by name, or are they
+   describing standing guidance? Is the result theirs, or is it a change to
+   their harness? Is the last step judgment, or is it computable — in which case
+   say so and offer them a plain CLI, which is cheaper to build, cheaper to run,
+   and testable.
 2. **Enumerate the steps**, and partition each with the three questions above.
    Write the partition down and show it to the user before writing any code.
    This is the artifact they should push back on.
@@ -362,20 +405,25 @@ is worth nothing; the partition is the whole design.
    which uncertainty fields ride along with each claim, the exit codes, and
    which verb is the dry run. Do this before implementing, because it is the
    interface between the halves and it is expensive to change later.
-4. **Write the tool.** It must produce evidence and stop short of the verdict.
+4. **Scaffold**, once the design is agreed — `scaffold_app.py --write`. The
+   directories and the manifest are right by construction, and what remains is
+   the content, which is the part that needed the conversation.
+5. **Write the tool.** It must produce evidence and stop short of the verdict.
    If you find yourself writing the ranking in Python, you have mis-partitioned
    — either the ranking is mechanical (in which case keep it, and the app is
    smaller than you thought) or it is judgment (in which case emit its inputs).
-5. **Write the SKILL.md**, in this order: what the tool is and how to invoke
+6. **Write the SKILL.md**, in this order: what the tool is and how to invoke
    it; how to read each evidence field, weakest to strongest; the rubric; the
    output shape; the honesty rules. Policy, not sequencing — if the prose is
-   mostly numbered steps, step 4 is unfinished.
-6. **Write the commands**, one per workflow, each naming the skill and its
+   mostly numbered steps, step 5 is unfinished.
+7. **Write the commands**, one per workflow, each naming the skill and its
    workflow rather than restating it. Commands are entry points; duplicating
    the policy into them creates two copies that will disagree.
-7. **Write its `.ag` file with `/agent-app:update-ag`**, so the app is a program
+8. **Write its `.ag` file with `/agent-app:update-ag`**, so the app is a program
    and not only a thing you can type into a REPL. Never hand-write the YAML.
-8. **Run `/agent-app:lint`** and fix what it finds before shipping.
+9. **Run `/agent-app:lint`**, fix what it finds, then `claude plugin validate`
+   before shipping. A clean lint says the halves agree; only validate says the
+   directory is a plugin.
 
 ### `/agent-app:update-ag` — make it runnable from a shell
 

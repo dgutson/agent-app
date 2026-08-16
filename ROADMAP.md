@@ -7,7 +7,7 @@
 > entries are no longer present in this file.
 
 Format: 1
-Next ID: R-025
+Next ID: R-026
 
 ---
 
@@ -221,6 +221,37 @@ Next ID: R-025
 - **Blocked-by:** —
 - **Enables:** —
 
+### R-025 — Declare a command's flags, not only its name
+
+- **Category:** Invocation
+- **What:** Decide how a command declares the options it accepts, and make the
+  launcher read that declaration. Today `argument-hint` is a free-text string:
+  `"--output FILE [--format txt|json]"` is prose that happens to look like a
+  usage line. The launcher renders it in `--help` and otherwise passes every
+  argument through blind, so nothing establishes that the app accepts
+  `--format`, nothing rejects `--fromat`, and `--help <command>` can only echo
+  the hint back. Options to weigh: a structured `options:` block in the command's
+  frontmatter; parsing the hint against a stated grammar; or deciding the app's
+  own argument parser is the only honest authority and the launcher should never
+  claim otherwise.
+- **Why:** R-014 claimed the argument surface is **declared** rather than
+  inferred at run time, and that is true of commands and false of their flags —
+  a gap that only became visible once an app with a real flag interface was
+  built (`diagnose-logs`, HISTORY 2026-08-16). Two things now depend on it:
+  - **R-017 cannot complete flags without it.** Completion for verbs comes from
+    `commands/*.md`; completion for `--output` has nowhere to come from, so the
+    completion story stops half-way at exactly the point users notice.
+  - **The flags-first change made the cost sharper.** With a `default-command`
+    declared, `./app.ag --typo` is now handed to the app instead of being a
+    usage error. That is the documented trade, but it is only tolerable while
+    the app itself diagnoses the typo; a declaration would let the launcher do
+    it before a session is ever started.
+- **Outcome:** A written decision on where a command's options are declared, and
+  — if the answer is anywhere other than "nowhere" — `--help <command>` renders
+  them and an unknown flag is caught without starting a model.
+- **Blocked-by:** —
+- **Enables:** R-017
+
 ### R-022 — The embedded form: an `.ag` file that carries its own skill
 
 - **Category:** Invocation
@@ -408,6 +439,11 @@ Next ID: R-025
   near it. The launcher already reads exactly that to render `--help` in 0.05s without
   looking up `claude`, so the mechanism is proven and the work is emitting the script.
   R-016's installer is what puts it where the shell will read it.
+
+  **Verb completion is reachable today; flag completion is not.** `argument-hint` is
+  free text, so there is nothing to complete `--output` *from* — that is R-025. Ship
+  verbs first rather than waiting, but do not claim the completion story is finished
+  until R-025 lands, because flags are the half users press Tab on most.
 - **Why:** The claim R-013 settled is that an agent app is a console app whose `main()`
   is a skill, and R-014 made that literal at the prompt. Completion is the part of "it
   behaves like `ls`" that users actually feel: a program you must remember the verbs of
