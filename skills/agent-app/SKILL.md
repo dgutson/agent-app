@@ -300,24 +300,28 @@ work:
 
 ## What to run, and when
 
-The three commands are not three views of one review. They answer different
+The four commands are not four views of one review. They answer different
 questions, at different points in an app's life, at very different cost.
 
-| | `create` | `lint` | `partition` |
-|---|---|---|---|
-| Question | what should this app be? | do the halves still agree? | is the line in the right place? |
-| Kind | judgment | mechanical | judgment |
-| Cost | a session | seconds | a careful read of both halves |
-| Cadence | once | every change, and in CI | at design time, then rarely |
-| Output | a new app | fixes | a proposed redesign |
+| | `create` | `update-ag` | `lint` | `partition` |
+|---|---|---|---|---|
+| Question | what should this app be? | how is it run from a shell? | do the halves still agree? | is the line in the right place? |
+| Kind | judgment | mechanical | mechanical | judgment |
+| Cost | a session | seconds | seconds | a careful read of both halves |
+| Cadence | once | at create, then when the commands change | every change, and in CI | at design time, then rarely |
+| Output | a new app | an `.ag` file | fixes | a proposed redesign |
 
 The lifecycle:
 
-1. **`/agent-app:create`** — once, at the start. It ends by running `lint`.
-2. **`/agent-app:lint`** — from then on, whenever either half changes, and in
+1. **`/agent-app:create`** — once, at the start. It ends by running the next
+   two.
+2. **`/agent-app:update-ag`** — once the commands exist, and again whenever
+   they change, since the `.ag` names an app whose declared surface it does not
+   copy. Cheap and mechanical; there is no reason not to re-run it.
+3. **`/agent-app:lint`** — from then on, whenever either half changes, and in
    CI. This is the one that runs constantly. It is a script precisely so that
    it can.
-3. **`/agent-app:partition`** — when `lint` reports `rederive` findings you
+4. **`/agent-app:partition`** — when `lint` reports `rederive` findings you
    cannot dismiss, when the app feels wrong ("the skill is doing too much"),
    or before a significant extension. Not on a schedule.
 
@@ -369,7 +373,53 @@ is worth nothing; the partition is the whole design.
 6. **Write the commands**, one per workflow, each naming the skill and its
    workflow rather than restating it. Commands are entry points; duplicating
    the policy into them creates two copies that will disagree.
-7. **Run `/agent-app:lint`** and fix what it finds before shipping.
+7. **Write its `.ag` file with `/agent-app:update-ag`**, so the app is a program
+   and not only a thing you can type into a REPL. Never hand-write the YAML.
+8. **Run `/agent-app:lint`** and fix what it finds before shipping.
+
+### `/agent-app:update-ag` — make it runnable from a shell
+
+An agent app is a console app whose `main()` is a skill, and the `.ag` file is
+what makes that literal: a shebang, a short YAML body naming the app, and the
+app is a program. Nobody should author one by hand — the facts needed to write
+it correctly are the same ones the launcher computes to run it.
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/update_ag.py" --root <path> --json
+```
+
+Nothing is written without `--write`. The script, not you, writes the file:
+it emits YAML the launcher has already accepted, which is one less place a
+model's idea of the format can show through.
+
+| Field | What it establishes |
+|---|---|
+| `resolution` | Which key names the app. `key` is `plugin` when `--root` **is** an installed copy, `plugin-dir` when it is a tree. The test is the path, never the name. |
+| `installed_as`, `install_path` | Where the app is installed, when it is. With `key: plugin-dir` these being set means the tree in front of you and the installed copy are different directories — the judgment in `note`, not a defect. |
+| `commands` | The declared surface: each command's `description` and `argument_hint`, from its own frontmatter. The same declaration the launcher renders as `--help`. |
+| `existing`, `present` | Whether an `.ag` was already there, and the keys it held. Every line of it survives except the ones `plan` changes. |
+| `plan` | One step per key, each with an `action`: `keep`, `add`, `fix`, `drop`. The `keep` steps are worth relaying — they are the evidence that nothing its author chose was discarded. `drop` appears only when it was asked for. |
+| `problems` | Reasons the file cannot be written. Not warnings: each is a repair needing a decision the script refuses to guess at. |
+| `validated` | Whether the launcher was asked to accept the file and what it said. `ran: false` means the launcher was not found, so the file was written but **never proved runnable** — report that, rather than reporting success. A non-zero `exit` puts the launcher's own words in `stderr`. |
+
+**Two things it deliberately does not decide.**
+
+1. **Whether this app should declare a `default-command`.** It is a real trade:
+   a default lets `./app.ag Dani` mean `./app.ag greet Dani`, and costs the
+   unknown-command diagnostic, because an unrecognised first argument becomes
+   an argument to the default instead of an error. For a one-command app there
+   is nothing to mistype into, so it is close to free. For an app with several,
+   it silently converts a typo into a run — which this plugin argues against
+   everywhere else. Recommend accordingly, and say which way you went.
+2. **What to do when `note` is set.** The app is installed at one path and you
+   are standing at another. `plugin-dir` keeps the file honest about the copy it
+   sits beside; `plugin:` makes it portable but runs the installed copy, which
+   is the staleness trap committed to a file. Put the choice to the user.
+
+**It never removes a key it did not add.** A key it cannot account for is far
+more likely to come from a newer launcher than from a typo, and deleting the
+author's line is the one repair that cannot be undone — so it refuses and
+relays what the launcher said.
 
 ### `/agent-app:lint` — has it drifted?
 

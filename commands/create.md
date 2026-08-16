@@ -34,6 +34,10 @@ Start with the partition, not the scaffold. In order:
    change, and give the inspecting ones no `Edit` and no `Write` in
    `allowed-tools`.** The grant is the enforcement; prose saying "read-only"
    next to an `Edit` grant does not survive the first obvious-looking fix.
-8. Run `/agent-app:lint` on the result and fix what it reports.
+8. **Give it a command line** with `/agent-app:update-ag`, so what you built is
+   a program and not only something typed into a REPL. Do not hand-write the
+   `.ag`, and do not teach its format here — the format is specified once, in
+   `launcher/ag-format.md`, and the command is what reads it.
+9. Run `/agent-app:lint` on the result and fix what it reports.
 
 Ask before creating files outside the directory the user named.

@@ -24,6 +24,13 @@ Until there is an installer, that is one symlink:
 $ ln -s "$PWD/launcher/agent-app-launcher" ~/.local/bin/agent-app-launcher
 ```
 
+**You should not have to write one of these by hand.** `/agent-app:update-ag`
+works out what the file should say for the app in front of it and writes it,
+and `/agent-app:create` runs it for every app it generates. This page is the
+specification; that command is the author. Everything below is here so the
+format has a written definition — not because reading it is a prerequisite to
+having a working `.ag`.
+
 ## What the file does *not* contain
 
 It **names** an app; it does not restate one. The commands, their usage lines

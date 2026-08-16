@@ -86,24 +86,27 @@ would be arguing against itself.
 
 ## The workflow
 
-Three commands, in the order an app meets them.
+Four commands, in the order an app meets them.
 
 1. **`/agent-app:create`** — once, at the start. It settles the partition with
    you before anything is scaffolded, designs the tool's evidence contract, then
-   writes both halves. It ends by running `lint`.
-2. **`/agent-app:lint`** — from then on, on every change and in CI. Seconds,
+   writes both halves. It ends by running the next two.
+2. **`/agent-app:update-ag`** — writes the `.ag` file that makes the app a
+   program you can run from a shell, so nobody hand-writes the YAML. Re-run it
+   when the app's commands change.
+3. **`/agent-app:lint`** — from then on, on every change and in CI. Seconds,
    deterministic, and read-only with respect to the app: it reports, it does not
    fix.
-3. **`/agent-app:partition`** — when `lint` reports `rederive` findings you
+4. **`/agent-app:partition`** — when `lint` reports `rederive` findings you
    cannot dismiss, when the app feels wrong, or before a significant extension.
    It reads both halves and proposes a redesign rather than a fix.
 
-| | `create` | `lint` | `partition` |
-|---|---|---|---|
-| Kind | judgment | mechanical | judgment |
-| Cost | a session | seconds | a careful read of both halves |
-| Cadence | once | every change, and in CI | at design time, then rarely |
-| Output | a new app | findings | a proposed redesign |
+| | `create` | `update-ag` | `lint` | `partition` |
+|---|---|---|---|---|
+| Kind | judgment | mechanical | mechanical | judgment |
+| Cost | a session | seconds | seconds | a careful read of both halves |
+| Cadence | once | when the commands change | every change, and in CI | at design time, then rarely |
+| Output | a new app | an `.ag` file | findings | a proposed redesign |
 
 If you only ever run one, run `lint`. It is the one whose findings accumulate
 silently.
@@ -116,10 +119,10 @@ not** — so the linter's `rederive` check produces the list and `partition` sta
 from it. Lint hands partition its evidence, exactly as a tool hands its skill
 evidence.
 
-### The fourth entry is not a command
+### The last entry is not a command
 
-Typing `/agent-app:` shows a fourth entry, `agent-app`. **It is not a command and
-you never need to type it.** There are three commands; that entry is the rulebook
+Typing `/agent-app:` shows one more entry, `agent-app`. **It is not a command and
+you never need to type it.** There are four commands; that entry is the rulebook
 they all load, and it appears only because Claude Code surfaces every skill as
 `/<plugin>:<skill>`. It also loads on its own when you ask something it covers
 ("should this be a script or a prompt?") with no command typed, which is why it

@@ -13,99 +13,45 @@ Next ID: R-025
 
 ## Now
 
-### R-023 — Generated apps ship an `.ag`, and `/agent-app:update-ag` writes it
-
-- **Category:** Commands
-- **What:** A command that writes and maintains an app's `.ag` file instead of
-  leaving the user to author YAML by hand, **and the step in `commands/create.md`
-  that calls it.** It reads the app in the current directory (or `$1`), works out
-  what the file should say, and writes or updates it: `plugin:` for an installed
-  app versus `plugin-dir:` for one in the tree, whether a `default-command:` is
-  warranted, and a `timeout:` if the app's own runs justify one. On an existing
-  `.ag` it reconciles rather than clobbers — the file may carry comments and a
-  deliberately non-obvious timeout, and overwriting somebody's considered value
-  is the same overreach as `/agent-app:lint` rewriting the app it was asked to
-  report on.
-
-  **This item carries the half of R-014 that R-014 did not deliver.** R-014
-  (delivered 2026-08-16 — see HISTORY.md) built the launcher and the format, but
-  its stated outcome also required that every app `/agent-app:create` generates
-  ships with that invocation, and `commands/create.md` was deliberately left
-  untouched because nothing existed to write the file. That is this item. The
-  eight-step workflow in `commands/create.md` gains a ninth step, and the ninth
-  step invokes this command rather than teaching the format inline — the format
-  is specified once, in `launcher/ag-format.md`.
-
-  **Most of this is mechanical and belongs in a script**, which is this plugin's
-  own partition rule applied to itself: which key applies is decided by whether
-  the plugin resolves in `installed_plugins.json`, and validity is decided by
-  whether `commands/*.md` exists and parses. What is left for the prose is the
-  judgment — whether a `default-command` is a good idea for *this* app, given
-  that declaring one costs the unknown-command diagnostic.
-
-  **Name it against R-015's rule before building it.** `update-yaml` names the
-  file format rather than the subject, and every other command in the plugin is
-  named for what it acts on. `update-ag` acts on the app you are standing in, so
-  it stays unsuffixed either way.
-- **Why:** The format is small — one required key out of four — but a
-  hand-written `.ag` is a file that can name a plugin that is not installed, a
-  `default-command` that is not a command, or a `plugin-dir` that does not
-  resolve, and every one of those is a run that fails at the shell rather than
-  at authoring time. The launcher already refuses all three, which means the
-  facts needed to write the file correctly are exactly the facts it already
-  computes; leaving the user to rediscover them by trial is the gap.
-
-  **It is also what stops the launcher having one user.** Today exactly one
-  `.ag` file exists — `launcher/examples/hello.ag` — and nothing generates
-  another, so the shell invocation is a demonstration rather than part of the
-  workflow. An app created tomorrow still comes out reachable only from a REPL,
-  which is the gap R-014 was supposed to close.
-- **Outcome:** `/agent-app:update-ag` writes a correct `.ag` for the app in
-  front of it, updates an existing one without discarding what its author chose,
-  and refuses with a reason when the app cannot be resolved. `/agent-app:create`
-  invokes it, so every generated app is executable from a shell without anyone
-  hand-writing YAML.
-- **Blocked-by:** —
-- **Enables:** —
-
 ### R-010 — Say plainly that `/agent-app:agent-app` is not a command
 
 - **Category:** Scaffolding
 - **What:** **No rename, and no deletion.** The entry stays and the plugin explains it.
-  The README half is written (see *The fourth entry is not a command*); two changes
+  The README half is written (see *The last entry is not a command*, renamed from
+  *The fourth entry…* when R-023 made the plugin's fourth command); two changes
   remain, both inside the plugin so they ship with it rather than needing per-machine
   setup:
   1. **Front-load the skill's `description`** with what the entry is — "Internal rulebook
-     for the agent-app plugin; not a command — use `/agent-app:create`, `:lint` or
-     `:partition`" — and keep the existing trigger phrases after it. The completion list
+     for the agent-app plugin; not a command — use `/agent-app:create`, `:update-ag`,
+     `:lint` or `:partition`" — and keep the existing trigger phrases after it. The completion list
      shows the description beside the slug, so this is the only text that reaches
      somebody at the moment they are typing `/agent-app:`. Do not gut the trigger
      phrases: the same field routes automatic invocation, and losing it would stop the
      skill firing on "should this be a script or prose?" with no command typed.
   2. **Make direct invocation a signpost, not a manual dump.** First instruction in the
-     body: if invoked with no task attached, name the three commands and stop.
+     body: if invoked with no task attached, name the four commands and stop.
 - **Why:** `/agent-app:agent-app` reads as a typo, and the user never needs to type it —
-  it is the rulebook the three commands share, surfaced as an entry only because Claude
+  it is the rulebook the four commands share, surfaced as an entry only because Claude
   Code makes every skill invocable as `/<plugin>:<skill>`. Three fixes were investigated
   and rejected; record the findings so nobody re-opens them:
 
   **Renaming** was the original proposal and is explicitly not wanted. A better word
-  still reads as a fourth command, which is the actual confusion — the problem is not the
+  still reads as one more command, which is the actual confusion — the problem is not the
   name, it is that the entry is not a command at all.
 
   **Hiding it is not possible in the direction required.** `skillOverrides` in
   `settings.json`, keyed by skill name, offers `name-only` (lists it without its
   description), `user-invocable-only` (hides it from the model, keeps the slash command)
   and `off` (hides it from both). There is no mode that hides it from the user while
-  keeping it loadable by the model, and `off` would break the three commands that load
+  keeping it loadable by the model, and `off` would break the four commands that load
   it. It is a user-side setting in any case, so a published plugin cannot ship it. No
   frontmatter flag does this either: across 46 installed skills on this machine the only
   keys in use are `name`, `description`, `disable-model-invocation` and `tools`, and
   `disable-model-invocation` blocks the model while keeping the user's slash command —
   again the wrong direction.
 
-  **Deleting the skill** and copying its content into the three command files was
-  rejected earlier: three copies of the partition rules and the evidence contract that
+  **Deleting the skill** and copying its content into the four command files was
+  rejected earlier: four copies of the partition rules and the evidence contract that
   can disagree with nothing able to detect it, in a plugin whose entire subject is prose
   drifting out of agreement with code. It is also not a token saving — today a command
   loads a short file plus the skill; with copies it loads one long file, at roughly the
@@ -320,6 +266,14 @@ Next ID: R-025
   show, check, review, audit, inspect, "read-only" — and `allowed-tools` grants `Edit`
   or `Write`, report it. Also the converse: a command whose body says it applies or
   writes but which holds neither grant will fail at runtime.
+
+  **The converse half has a counter-example in this plugin already, and the check must
+  not fire on it.** `/agent-app:update-ag` says it writes a file and holds neither grant
+  on purpose: its script does the writing, invoked through `Bash`, which is the rule
+  `/agent-app:lint` states and the reason a written `.ag` is always one the launcher
+  accepted. So "writes" plus "no write grant" is not the defect — "writes, holds no write
+  grant, **and names no script that does**" is. Build it that way, or the first thing the
+  check reports will be the plugin's own correct command.
 - **Why:** `/agent-app:lint` shipped with exactly this defect and edited a user's
   repository on its first real run. The grants were fixed by hand, and `commands/*.md`
   now carries a prose rule telling authors to split inspect from change — but prose is
@@ -366,7 +320,7 @@ Next ID: R-025
   merely recommended.
 - **Why:** A CLI answers `--help`; an agent app has no equivalent, so a user who installs
   one has to read the plugin's README or its SKILL.md to find out what they can invoke.
-  The plugin's own three commands are already past the point where that is obvious.
+  The plugin's own four commands are already past the point where that is obvious.
 
   **Overlaps R-015 deliberately, and must not fork from it or from the launcher.** R-014
   went first (see HISTORY.md), so the conditional this item used to carry has resolved:

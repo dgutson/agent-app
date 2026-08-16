@@ -1,0 +1,4 @@
+#!/usr/bin/env agent-app-launcher
+plugin-dir: .
+description: 'Build and maintain agent apps: partition the work, lint the seam, give
+  them a command line.'
