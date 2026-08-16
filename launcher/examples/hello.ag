@@ -1,0 +1,6 @@
+#!/usr/bin/env agent-app-launcher
+# The smallest agent app there is: one executable file that names an app.
+
+plugin-dir: ./hello
+default-command: greet
+description: Greet somebody by name, from a shell or a script.

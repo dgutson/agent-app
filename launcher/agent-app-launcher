@@ -1,0 +1,270 @@
+#!/usr/bin/env python3
+"""Run an agent app from a shell, with an exit status a script can branch on.
+
+A file named `<app>.ag` starting with `#!/usr/bin/env agent-app-launcher` is a
+program. The rest is YAML — the shebang is also a YAML comment — and it names
+an app rather than restating one: commands, their usage lines and their tool
+grants are read from the plugin's own `commands/*.md` frontmatter.
+
+Two things are not obvious and are measured, not assumed:
+
+`claude -p` exits 0 for any session that completed, whatever it concluded, so
+its status cannot carry a verdict. `--json-schema` makes the harness enforce
+one instead, returned parsed as `structured_output`; the mapping to an integer
+at the bottom of main() is the whole result channel.
+
+Without `--allowed-tools`, a headless run cannot use Bash, so an app that
+shells out to its own tool does nothing. The grant comes from the command's
+declared `allowed-tools` — never wider.
+
+stdout is the app's output alone, so it survives a pipe. Everything else goes
+to stderr.
+
+Exit: 0 affirmative, 1 negative, 2 usage, 3 refused, 4 app failed,
+5 no verdict (`claude` missing, wall-clock kill, or a session that returned
+none). There is no `--max-turns` in this CLI; the bound is the wall clock.
+"""
+
+import argparse
+import json
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import textwrap
+from pathlib import Path
+
+import yaml
+
+PROG = Path(sys.argv[0]).name
+KEYS = {"plugin", "plugin-dir", "default-command", "timeout",
+        "description", "epilog"}
+
+# Printed under the commands unless the .ag file replaces it. It is here
+# rather than in an error message because the rule is worth knowing before
+# tripping on it, not after.
+EPILOG = ("Options bind before the command. After it, every argument belongs "
+          "to the app,\nincluding flags of these same names.")
+
+# The result channel. Enforced by the harness, so a prose half that forgets the
+# protocol fails loudly rather than quietly returning chat. The descriptions
+# are addressed to the model — the only place it is certain to read them.
+SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["status", "output"],
+    "properties": {
+        "status": {
+            "type": "string",
+            "enum": ["ok", "findings", "refused", "error"],
+            "description":
+                "The verdict the caller branches on, about the app's subject "
+                "rather than about whether you managed to answer. 'ok': the "
+                "affirmative outcome — clean, current, nothing to do. "
+                "'findings': the negative-but-normal one — findings, drift, "
+                "work outstanding; not an error. 'refused': you declined, "
+                "because something a safe answer depends on could not be "
+                "established, and nothing was changed. 'error': the app tried "
+                "to run and failed.",
+        },
+        "output": {
+            "type": "string",
+            "description":
+                "Exactly what this app would print to stdout were it an "
+                "ordinary command, and the only thing the caller sees. No "
+                "preamble, no sign-off, no offer to do more.",
+        },
+    },
+}
+
+PROTOCOL = """\
+You are the main() of an agent app invoked from a shell. There is no chat here
+and nobody is reading a transcript. The caller sees one thing: the `output`
+string of your final structured answer. Write it as a program's output — the
+report itself, starting at its first real word.
+
+`status` is the exit status, so it is a claim about the app's subject, not
+about your own success: an app that ran correctly and found problems is
+`findings`, not `error`.
+
+Never ask a question; there is nobody to answer it. If a decision belongs to
+the caller, that is `refused`, with the question stated in `output`.
+"""
+
+
+def die(message, code=2):
+    print(f"{PROG}: {message}", file=sys.stderr)
+    sys.exit(code)
+
+
+def frontmatter(path):
+    """The YAML frontmatter of a markdown file, as a mapping."""
+    m = re.match(r"^---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|$)",
+                 path.read_text(encoding="utf-8", errors="replace"), re.S)
+    try:
+        block = yaml.safe_load(m.group(1)) if m else None
+    except yaml.YAMLError:
+        return {}
+    return block if isinstance(block, dict) else {}
+
+
+def installed(name):
+    """Where a plugin lives, from the harness's own record.
+
+    `installed_plugins.json` carries `installPath` outright, so the cache
+    layout is never reassembled here.
+    """
+    config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    registry = config / "plugins" / "installed_plugins.json"
+    try:
+        plugins = json.loads(registry.read_text())["plugins"]
+    except (OSError, ValueError, KeyError):
+        die(f"no usable plugin registry at {registry}")
+    hits = [k for k in plugins if k == name or k.split("@", 1)[0] == name]
+    if len(hits) != 1:
+        die(f"{name!r} matches {len(hits)} installed plugins"
+            + (f" — {', '.join(sorted(hits))}; write it as name@marketplace"
+               if hits else "; install it, or use `plugin-dir:`"))
+    return Path(plugins[hits[0]][0]["installPath"])
+
+
+def main(argv):
+    if not argv:
+        die(f"usage: {PROG} <app.ag> [--help] <command> [args...]")
+
+    ag = Path(argv[0])
+    try:
+        doc = yaml.safe_load(ag.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, yaml.YAMLError) as exc:
+        die(f"{ag}: {exc}")
+    if not isinstance(doc, dict):
+        die(f"{ag}: expected a YAML mapping of settings")
+    if set(doc) - KEYS:
+        die(f"{ag}: unknown key(s) {', '.join(sorted(set(doc) - KEYS))} — "
+            f"known: {', '.join(sorted(KEYS))}")
+
+    if "plugin-dir" in doc:
+        root = (ag.parent / str(doc["plugin-dir"])).resolve()
+    elif "plugin" in doc:
+        root = installed(str(doc["plugin"]))
+    else:
+        die(f"{ag}: names no app — give it `plugin:` or `plugin-dir:`")
+    if not root.is_dir():
+        die(f"{ag}: {root} is not a directory")
+
+    # The declaration. One source: the plugin's own command files, which every
+    # app already has, so nothing new is written to give one a command line.
+    cmds = {p.stem: frontmatter(p) for p in sorted((root / "commands").glob("*.md"))}
+    if not cmds:
+        die(f"{root} has no commands/*.md, so it declares nothing to invoke")
+    manifest = root / ".claude-plugin" / "plugin.json"
+    info = json.loads(manifest.read_text()) if manifest.is_file() else {}
+    name = info.get("name") or root.name
+
+    try:
+        seconds = int(doc.get("timeout", 900))
+    except (TypeError, ValueError):
+        die(f"{ag}: timeout wants whole seconds, not {doc['timeout']!r}")
+
+    # Launcher options bind before the command; REMAINDER hands everything
+    # after it to the app untouched, including flags of the same names.
+    #
+    # argparse renders the help rather than a hand-written block, so the
+    # options section cannot drift from the options themselves — which is the
+    # failure this whole repository is about.
+    pad = max(map(len, cmds))
+    default = str(doc.get("default-command", "") or "")
+    # The description is printed as its author wrote it. Truncating it to a
+    # first sentence would mean guessing where sentences end, which is both
+    # unreliable and the thing this repository exists to complain about:
+    # re-deriving in code what a declaration already states.
+    listing = "\n".join(textwrap.fill(
+        f"{c.ljust(pad)}  {cmds[c].get('description', '')}"
+        f"{'  (default)' if c == default else ''}".rstrip(),
+        width=78, initial_indent="  ", subsequent_indent="  " + " " * (pad + 2))
+        for c in sorted(cmds))
+    cli = argparse.ArgumentParser(
+        prog=ag.name, add_help=False,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=str(doc.get("description") or info.get("description", "")).strip(),
+        epilog=f"commands:\n{listing}\n\n"
+               f"{str(doc.get('epilog') or EPILOG).strip()}\n\n"
+               "exit: 0 affirmative, 1 negative, 2 usage, 3 refused, "
+               "4 failed, 5 no verdict")
+    cli.add_argument("--help", "-h", action="store_true", dest="help",
+                     help="this, or a command's own usage")
+    cli.add_argument("--dry-run", action="store_true",
+                     help="print the resolved claude command and stop")
+    cli.add_argument("--timeout", type=int, default=seconds, metavar="SEC",
+                     help=f"wall clock for the run (default {seconds})")
+    cli.add_argument("command", nargs="?", help="one of the commands below")
+    cli.add_argument("args", nargs=argparse.REMAINDER,
+                     help="passed to the app untouched")
+    opts = cli.parse_args(argv[1:])
+    args = [a for a in opts.args if a not in ("--help", "-h")]
+    want_help = opts.help or len(args) != len(opts.args)
+
+    # A declared default is what lets `./hello.ag Dani` mean `greet Dani`. The
+    # cost is that a mistyped command becomes an argument to the default
+    # instead of an error, so it is opt-in per app rather than assumed.
+    if default and default not in cmds:
+        die(f"{ag}: default-command {default!r} is not one of "
+            f"{', '.join(sorted(cmds))}")
+    named = opts.command is not None and (opts.command in cmds or not default)
+    cmd = opts.command if named else default
+    if not named and opts.command is not None:
+        args = [opts.command, *args]
+
+    # --help is a determinable fact about the app, so it is answered here
+    # rather than by paying for a session to compose it. No model is started:
+    # `claude` is not looked up until after this returns.
+    if want_help:
+        if named and cmd in cmds:
+            print(f"usage: {ag.name} {cmd} {cmds[cmd].get('argument-hint', '')}".rstrip())
+            print(f"\n{cmds[cmd].get('description', '')}".rstrip())
+        else:
+            cli.print_help()
+        return 0
+    if not cmd:
+        die(f"no command given — {', '.join(sorted(cmds))}")
+    if cmd not in cmds:
+        die(f"{name} has no command {cmd!r} — {', '.join(sorted(cmds))}")
+
+    grant = cmds[cmd].get("allowed-tools") or ""
+    line = " ".join(shlex.quote(a) if re.search(r"\s", a) else a for a in args)
+    run = ["claude", "-p", f"/{name}:{cmd} {line}".strip(),
+           "--output-format", "json",
+           "--json-schema", json.dumps(SCHEMA),
+           "--append-system-prompt", PROTOCOL,
+           "--plugin-dir", str(root)]
+    if grant:
+        run += ["--allowed-tools",
+                ", ".join(grant) if isinstance(grant, list) else str(grant)]
+    if opts.dry_run:
+        print(shlex.join(run))
+        return 0
+
+    if shutil.which("claude") is None:
+        die("claude is not on PATH", 5)
+    try:
+        done = subprocess.run(run, capture_output=True, text=True, timeout=opts.timeout)
+    except subprocess.TimeoutExpired:
+        die(f"no answer within {opts.timeout}s (raise --timeout)", 5)
+    try:
+        verdict = json.loads(done.stdout)["structured_output"]
+        status, output = verdict["status"], verdict["output"]
+    except (ValueError, KeyError, TypeError):
+        first = (done.stderr or done.stdout or "").strip().splitlines()[:1]
+        die("the session returned no verdict" + (f": {first[0]}" if first else ""), 5)
+
+    # stdout carries the app's output and nothing else, so whatever is on the
+    # far end of a pipe sees a program rather than a session.
+    if output:
+        print(output.rstrip("\n"))
+    return {"ok": 0, "findings": 1, "refused": 3, "error": 4}.get(status, 5)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
