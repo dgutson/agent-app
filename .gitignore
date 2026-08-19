@@ -8,3 +8,7 @@ __pycache__/
 
 # Session scratch written by the handoff plugin, removed by /handoff:finish.
 HANDOFF.md
+
+# The linter's own findings, rewritten by every `--emit` run. Output, not
+# source — and this repo lints itself on every change, so it is always here.
+.agent-app-findings.json

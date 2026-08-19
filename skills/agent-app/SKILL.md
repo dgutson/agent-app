@@ -87,8 +87,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lint_agent_app.py" --root <plugin-dir> [-
 | `--wide` | Extract evidence keys from every module, not only the one that writes the payload. Higher recall, much more noise. |
 | `--only CHECK` | Report one check — `unread`, `stale-ref`, `rederive`, `xref`, `exit-code`, `command`, `frontmatter` — or one rule code, `AA301`. An unknown value is a usage error, not an empty report: a typo must never read as a clean run. |
 | `--verbose` | Print every finding. Without it, a rule that fires more than six times in one file collapses to a list of its subjects. Console only. |
+| `--emit [PATH]` | Also write the findings payload to a file, with a content hash of every file the run read. Defaults to `.agent-app-findings.json` in the root; a directory gets that name inside it. The console report is unchanged. |
+| `--check-emit [PATH]` | Report whether an emitted payload still describes the tree, then exit without linting anything. |
 
-Exit codes: `0` clean, `1` findings, `2` usage error.
+Exit codes: `0` clean, `1` findings, `2` usage error, `3` an emitted payload is stale.
 
 The two output channels are not the same report. The console is written for a
 person — one line per finding, paths relative to the root, each rule's fix
@@ -167,6 +169,50 @@ prose-only app has no second half for `unread` to read; that is a fact about
 how it is built, not a gap in what was measured. Say "does not apply", never
 "was not checked", and never let it colour the verdict — an artifact with four
 inapplicable checks and no findings is clean.
+
+### `--emit` — the findings, kept for whatever acts on them next
+
+`--json` hands the payload to the session that ran the lint. `--emit` writes
+the same structure to a file, so a later step — another command, another
+session, the next job in CI — can act on those findings without running the
+analysis again. Re-running it is not free and not equivalent: it costs the same
+as the first run for no new information, and the two disagree whenever the tree
+moved in between, with nothing to say which one the reader is holding.
+
+Emitting does not make a reporting command a writing one. The line is **whose
+work is changed**, and a run's own findings are its output, not the user's
+source; the file is theirs to commit or ignore. The command still holds no
+`Edit` and no `Write`, because the script writes it, invoked through `Bash`.
+
+The file carries everything `--json` prints, plus two fields it does not:
+`format`, and a `provenance` block holding the rest of this table.
+
+| Field | What it is | How to treat it |
+|---|---|---|
+| `format` | Shape of the payload, `1` today. | Read it first, and refuse a number you do not know rather than picking fields out of a structure you are guessing at. |
+| `provenance` | How the file came to exist, and what it was true of. | This is what makes a file usable after the run that wrote it has ended. A payload without it came from something else, whatever its shape. |
+| `emitted_by` | The tool that wrote it. | Names the contract these fields belong to. |
+| `only` | The `--only` filter in force, empty if none. | **Read this before treating the file as the whole report.** A payload emitted under `--only unread` holds one check's findings and otherwise reads exactly like a clean run of all of them. |
+| `wide` | Whether `--wide` was in force. | `false` means evidence keys came only from the file that assembles the payload; the `unread-recall` entry in `coverage` says how many that missed. |
+| `files` | Every file the run read, repo-relative, each with a content digest. | Prose, source, `.agent-app-allow` and the plugin manifest — the last two because a file that changes the findings without being either half is the one a staleness check gets wrong. |
+| `tree_hash` | One digest over that whole set. | The short form, for a log line or a commit message. |
+
+`--json` carries no `provenance`, and that is deliberate rather than an
+oversight: a session reading stdout has no staleness question, because the run
+it is reading just happened. A file outlives the tree it describes, so it has
+to carry enough to be distrusted.
+
+**Staleness is a computed fact here too, so do not eyeball it.** `--check-emit`
+re-hashes the tree and answers in a status and an exit code:
+
+| Status | Exit | Means |
+|---|---|---|
+| `current` | `0` | Every file the run read still hashes to what it hashed then. The findings apply. |
+| `stale` | `3` | Something moved. The output names the paths as `changed`, `added` or `removed` — enough to say what invalidated the file without going back to `git status`. |
+| `unusable` | `2` | Absent, unparseable, written by something else, or a `format` this build does not know. All four mean the same thing to a caller: you do not have findings yet. |
+
+Acting on a stale payload is worse than having none, because the findings will
+mostly still look right. Refuse it and say so.
 
 ## The partition
 
@@ -487,7 +533,9 @@ Report, then stop. If the user reads the report and asks for the fixes, apply
 them as an ordinary request — but that is a second instruction from them, never
 a continuation of this one.
 
-1. Run the tool with `--json` against the plugin root, with no other flags.
+1. Run the tool with `--json --emit` against the plugin root, and no other
+   flags. `--emit` leaves the findings on disk for whatever fixes them, so the
+   analysis is paid for once; it changes nothing about the report you give.
 2. **Read `classification` first, and say what you are looking at.** If
    `warning` is set, lead with it: they have pointed an agent-app linter at
    something that is not an app, and the useful reply names what it is —
@@ -529,9 +577,11 @@ a continuation of this one.
    added *later* must be classified. The baseline is a to-do list, not an
    absolution. **Recommend it; do not run it** — it writes a file into the
    user's repository.
-6. Close with the counts by severity, and stop. If the user then asks for the
-   fixes, that is a fresh instruction and you can act on it — but do not offer
-   to "just quickly fix" one as part of this report.
+6. Close with the counts by severity, then one line naming the file `--emit`
+   wrote and saying it can be committed or ignored — a file that appeared in
+   their repository unannounced is a surprise, however defensible. Then stop.
+   If the user asks for the fixes, that is a fresh instruction and you can act
+   on it — but do not offer to "just quickly fix" one as part of this report.
 
 ### `/agent-app:partition` — is the split in the right place?
 

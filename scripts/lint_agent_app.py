@@ -16,12 +16,13 @@ rather than passed.
 It reports what it could not check as loudly as what it found, because an
 unrun check is not a passing one.
 
-Exit codes:  0 clean   1 findings   2 usage error
+Exit codes:  0 clean   1 findings   2 usage error   3 emitted payload is stale
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -30,6 +31,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ALLOW_FILE = ".agent-app-allow"
+
+# Where `--emit` writes when nobody says. Named here rather than spelled inline
+# because the prose tells a consumer to look for this file, so renaming it in
+# one place and not the other sends somebody to read nothing.
+EMIT_FILE = ".agent-app-findings.json"
+
+# Bumped when the emitted payload changes shape. A consumer reads it before
+# anything else and refuses a number it does not know, rather than picking
+# fields out of a structure it is guessing at.
+EMIT_FORMAT = 1
 
 # Directories that never hold either prose or first-party source.
 SKIP_DIRS = {
@@ -909,6 +920,146 @@ def write_allow(
 
 
 # --------------------------------------------------------------------------
+# the findings payload, and putting it somewhere a later run can read
+# --------------------------------------------------------------------------
+
+def payload(root: Path, shape: Shape, findings: list[Finding], cov: Coverage) -> dict:
+    """The machine-readable report, assembled once.
+
+    Both channels that carry findings — `--json` on stdout and the file
+    `--emit` writes — are built from here, so a consumer of one is never
+    reading a different structure from a consumer of the other.
+    """
+    return {
+        "root": str(root),
+        "classification": shape.as_dict(),
+        "findings": [f.as_dict() for f in findings],
+        "coverage": {
+            "prose_files": cov.prose_files,
+            "source_files_read": len(cov.source_files),
+            "checks_skipped": cov.skipped,
+        },
+    }
+
+
+def inputs_read(root: Path) -> list[Path]:
+    """Every file a run reads on its way to a finding.
+
+    Prose and source are the two anybody would name. The allowlist and the
+    plugin manifest are the two that get forgotten and that silently change the
+    answer: an `.agent-app-allow` line retires a finding, and the manifest's
+    `name` decides what a command's slug is. Hashing only the obvious two would
+    call a payload current after exactly the edits most likely to have
+    invalidated it.
+    """
+    out: set[Path] = {pr.path for pr in collect_prose(root)}
+    out |= set(collect_sources(root, set()))
+    for extra in (root / ALLOW_FILE, root / ".claude-plugin" / "plugin.json",
+                  root / "hooks" / "hooks.json", root / ".mcp.json"):
+        if extra.is_file():
+            out.add(extra)
+    return sorted(out)
+
+
+def _digest(path: Path) -> str:
+    """Truncated, because this establishes that a file moved, nothing more.
+
+    Sixteen hex digits is far past coincidence for a working tree and short
+    enough that the hashes stay a footnote in the payload rather than most of
+    it. Anyone needing a hash to survive an adversary needs a different tool.
+    """
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+
+
+def tree_state(root: Path) -> dict[str, str]:
+    """Repo-relative path -> digest, for everything the run read.
+
+    Relative on purpose: a payload emitted in one checkout is then answerable
+    in another, which is what lets CI emit in one job and consume in the next.
+    """
+    return {_rel(p, root): _digest(p) for p in inputs_read(root)}
+
+
+def tree_hash(state: dict[str, str]) -> str:
+    """One digest over the whole read set — the thing worth quoting in a log."""
+    h = hashlib.sha256()
+    for path in sorted(state):
+        h.update(f"{path}\0{state[path]}\0".encode())
+    return h.hexdigest()[:16]
+
+
+def resolve_emit(arg: str, root: Path) -> Path:
+    """`--emit` with no value, or with a directory, lands on the default name."""
+    if not arg:
+        return root / EMIT_FILE
+    target = Path(arg)
+    return target / EMIT_FILE if target.is_dir() else target
+
+
+def emit_findings(
+    path: Path, root: Path, shape: Shape, findings: list[Finding],
+    cov: Coverage, only: str, wide: bool,
+) -> dict:
+    """Write the payload, plus what a later reader needs to distrust it.
+
+    The `provenance` block is the difference between this file and `--json`,
+    and it is why it is only in this one. A session reading stdout has no
+    staleness question — the run it is reading just happened. A file outlives
+    the tree it describes, so it has to carry enough to say so: what the run
+    read and what those files hashed to, and which flags shaped the result,
+    since a payload written under `--only` holds one check's findings and
+    reads exactly like a clean run of all of them.
+    """
+    state = tree_state(root)
+    data = {"format": EMIT_FORMAT, **payload(root, shape, findings, cov)}
+    data["provenance"] = {
+        "emitted_by": "lint_agent_app.py",
+        "only": only,
+        "wide": wide,
+        "tree_hash": tree_hash(state),
+        "files": state,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return data
+
+
+def check_emit(path: Path, root: Path) -> tuple[str, dict]:
+    """Does an emitted payload still describe this tree?
+
+    Returns a status and its evidence. `unusable` covers every way the file
+    cannot answer the question — absent, unparseable, written by something
+    else, written in a format this build does not know — because they all mean
+    the same thing to a caller: you do not have findings, go and get some.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return "unusable", {"reason": f"no such file: {path}"}
+    except (OSError, json.JSONDecodeError) as exc:
+        return "unusable", {"reason": f"cannot read {path}: {exc}"}
+    prov = data.get("provenance") if isinstance(data, dict) else None
+    if not isinstance(prov, dict) or not isinstance(prov.get("files"), dict):
+        return "unusable", {"reason": f"{path} carries no provenance block; it "
+                                      "was not written by --emit"}
+    seen = data.get("format")
+    if seen != EMIT_FORMAT:
+        # Naming which half is old matters: the reflex on a version mismatch is
+        # to re-emit, and that is the wrong move when this linter is the old one.
+        older = "this linter" if isinstance(seen, int) and seen > EMIT_FORMAT else "the file"
+        return "unusable", {"reason": f"{path} is format {seen}, and this build "
+                                      f"knows {EMIT_FORMAT} — {older} is the old half"}
+    was, now = prov["files"], tree_state(root)
+    detail = {
+        "changed": sorted(p for p in set(now) & set(was) if now[p] != was[p]),
+        "added": sorted(set(now) - set(was)),
+        "removed": sorted(set(was) - set(now)),
+    }
+    moved = sum(len(v) for v in detail.values())
+    return ("current" if not moved else "stale"), detail
+
+
+# --------------------------------------------------------------------------
 # report
 # --------------------------------------------------------------------------
 
@@ -1030,6 +1181,27 @@ def _print_inapplicable(rows: list[dict]) -> None:
     for s in sorted(rows, key=lambda s: s["check"]):
         head = f"  {s['check']:<{nw}}  "
         print(_wrap(s["reason"], head, " " * len(head)))
+
+
+def render_emit_check(path: Path, status: str, detail: dict) -> None:
+    """One line for a machine to branch on, then the paths a person needs.
+
+    The exit status is the answer; this is the part that says which file moved,
+    because "stale" with nothing named is a report that sends the reader back
+    to `git status` to work out what this run already knew.
+    """
+    if status == "unusable":
+        print(detail["reason"], file=sys.stderr)
+        return
+    if status == "current":
+        print(f"current: {path} still describes this tree")
+        return
+    kinds = [k for k in ("changed", "added", "removed") if detail[k]]
+    print(f"stale: {path} was written before "
+          + ", ".join(f"{_count(len(detail[k]), 'file')} {k}" for k in kinds))
+    for kind in kinds:
+        for rel in detail[kind]:
+            print(f"  {kind:<7}  {rel}")
 
 
 def render(
@@ -1178,6 +1350,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--init-allow", action="store_true",
                     help=f"write a {ALLOW_FILE} baseline of every currently "
                          "unread evidence key, then exit")
+    ap.add_argument("--emit", metavar="PATH", nargs="?", const="", default=None,
+                    help="also write the findings payload to PATH, with a content "
+                         "hash of every file the run read, so a later step can tell "
+                         f"whether it still applies (default: {EMIT_FILE} in the "
+                         "root). The console report is unchanged")
+    ap.add_argument("--check-emit", metavar="PATH", nargs="?", const="", default=None,
+                    help="report whether an emitted payload still describes the "
+                         f"tree (default: {EMIT_FILE} in the root), then exit "
+                         "without linting anything")
     ap.add_argument("--only", metavar="CHECK", default="",
                     help="report only this check or rule code")
     ap.add_argument("--wide", action="store_true",
@@ -1191,6 +1372,35 @@ def main(argv: list[str] | None = None) -> int:
     root: Path = args.root.resolve()
     if not root.is_dir():
         print(f"not a directory: {root}", file=sys.stderr)
+        return 2
+
+    # Three modes, and each writes or reads something the others do not. Asking
+    # for two at once is a sentence with no meaning, and running one of them
+    # silently would leave the caller believing the other also happened.
+    modes = [name for name, on in (("--init-allow", args.init_allow),
+                                   ("--emit", args.emit is not None),
+                                   ("--check-emit", args.check_emit is not None))
+             if on]
+    if len(modes) > 1:
+        print(f"{' and '.join(modes)} do different jobs; pick one", file=sys.stderr)
+        return 2
+
+    if args.check_emit is not None:
+        target = resolve_emit(args.check_emit, root)
+        status, detail = check_emit(target, root)
+        if args.json and status != "unusable":
+            print(json.dumps({"status": status, "emit": str(target), **detail},
+                             indent=2))
+        else:
+            render_emit_check(target, status, detail)
+        # Spelled out rather than looked up in a dict. A status a reader cannot
+        # find by looking for `return` is one nobody documents, which is the
+        # AA502 defect this linter reports in other people's tools — and it
+        # reported it here first.
+        if status == "current":
+            return 0
+        if status == "stale":
+            return 3
         return 2
 
     only = args.only.strip()
@@ -1234,18 +1444,24 @@ def main(argv: list[str] | None = None) -> int:
                        or s["check"] == check or s["check"].startswith(check + "-")]
 
     if args.json:
-        print(json.dumps({
-            "root": str(root),
-            "classification": shape.as_dict(),
-            "findings": [f.as_dict() for f in findings],
-            "coverage": {
-                "prose_files": cov.prose_files,
-                "source_files_read": len(cov.source_files),
-                "checks_skipped": cov.skipped,
-            },
-        }, indent=2))
+        print(json.dumps(payload(root, shape, findings, cov), indent=2))
     else:
         render(findings, cov, root, verbose=args.verbose, only=only, shape=shape)
+
+    if args.emit is not None:
+        target = resolve_emit(args.emit, root)
+        try:
+            data = emit_findings(target, root, shape, findings, cov, only, args.wide)
+        except OSError as exc:
+            # Louder than the findings it failed to write. A caller told nothing
+            # goes looking for a file that is not there, or reads an older one.
+            print(f"could not write {target}: {exc}", file=sys.stderr)
+            return 2
+        # Never on stdout under --json: a human line inside the payload would
+        # break the one consumer that channel exists for.
+        print(f"emitted {target} — {_count(len(findings), 'finding')}, "
+              f"tree {data['provenance']['tree_hash']}",
+              file=sys.stderr if args.json else sys.stdout)
 
     return 1 if findings else 0
 

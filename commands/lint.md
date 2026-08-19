@@ -19,7 +19,13 @@ reason. If a finding is worth fixing, say so and stop.
 That constraint is about the user's material, not about writing as such — the
 linter emitting its own findings file is output, and theirs to keep or discard.
 
-1. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lint_agent_app.py" --root <path> --json`
+1. `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/lint_agent_app.py" --root <path> --json --emit`
+
+   `--emit` writes the findings to `.agent-app-findings.json` in that root,
+   with a content hash of every file the run read. It is what lets a later fix
+   step act on this analysis instead of running its own, and tell that the tree
+   has moved since. Your report is the same either way; say at the end that the
+   file is there.
 
    **Do not pass `--init-allow`.** Not because it writes a file, but because
    `.agent-app-allow` records which findings were deliberately accepted, and
@@ -59,6 +65,8 @@ linter emitting its own findings file is output, and theirs to keep or discard.
    `/agent-app:partition`. On an app with no tool at all, this is the report:
    every one of them is a fact its prose re-establishes on each run.
 
-7. Close with the counts by severity, and stop. Do not apply anything here, and
-   do not offer to "just quickly fix" one. If the user reads the report and
-   asks for the fixes, that is a fresh instruction and can be acted on then.
+7. Close with the counts by severity, then one line: where the findings file
+   was written, and that it is theirs to commit or ignore. Then stop. Do not
+   apply anything here, and do not offer to "just quickly fix" one. If the user
+   reads the report and asks for the fixes, that is a fresh instruction and can
+   be acted on then.
