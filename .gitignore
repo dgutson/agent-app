@@ -12,3 +12,8 @@ HANDOFF.md
 # The linter's own findings, rewritten by every `--emit` run. Output, not
 # source — and this repo lints itself on every change, so it is always here.
 .agent-app-findings.json
+
+# What every `.ag` run appends beside its file. A verbatim transcript of a
+# session — file contents, command output, subagent prompts — so it is not
+# something to commit, here or in anybody's repository.
+*.log

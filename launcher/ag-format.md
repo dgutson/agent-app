@@ -168,6 +168,54 @@ transcript, no envelope — so an `.ag` file survives a pipe. Everything the
 launcher itself has to say goes to stderr, except an answer the launcher *is*
 the author of (`--help`, `--dry-run`), exactly as with `git --help`.
 
+## The log
+
+Every run appends to **`<app>.log` beside the `.ag` file** — `hello.ag` writes
+`hello.log` — and the path is printed to stderr *before* the session starts, so
+`tail -f` can be pointed at a run that is still going. That is the whole point:
+the question a log answers is what this thing is doing right now, and a file you
+learn about at exit only ever answers it in the past tense.
+
+JSONL, one event per line: the session's own event stream **verbatim**, between
+two lines the launcher writes itself.
+
+```console
+{"type":"launcher","subtype":"run_started","app":"agent-app","command":"lint",
+ "args":[],"at":"2026-08-19T15:08:02-03:00","cwd":"…","timeout":900,"max_cost":5.0}
+…
+{"type":"launcher","subtype":"run_finished","exit":0,"status":"ok",
+ "cost":0.194,"seconds":14.9}
+```
+
+Between them, everything the session did:
+
+| Line | What it answers |
+|---|---|
+| `assistant` / `user` | Every tool call and its result. `parent_tool_use_id` says whose: absent for the main agent, the `Agent` tool_use id for that subagent's own work — so concurrent work separates. |
+| `system/task_started` | A subagent was raised: its `subagent_type`, description, and the full prompt it was handed. |
+| `system/task_progress` | What it is costing: `total_tokens`, `tool_uses`, `duration_ms`, `last_tool_name`. |
+| `system/task_notification` | What it returned — status, `output_file`, and a summary. |
+| `result` | The verdict and `total_cost_usd`. |
+
+Four things about it that are decisions, not accidents:
+
+- **It is verbatim, and therefore sensitive.** Tool results carry command output
+  and file contents in full, and `task_started` carries whole prompts. That is
+  exactly what makes it worth having when a run went wrong, and exactly why it
+  should be treated like a transcript rather than like a build artifact. Nothing
+  is redacted. This repository gitignores `*.log` for that reason.
+- **It appends and is never rotated**, so it grows: roughly 24 KB for a
+  15-second run. Auditability is worth more than tidiness, but the file is
+  yours to trim.
+- **Every ending is recorded, including the ones that failed** — a kill at the
+  wall clock, a stop at the spending cap, a session that returned no verdict.
+  A log that simply stops cannot tell a crash from a kill.
+- **A run is never failed for the sake of its log.** If the file cannot be
+  opened, the launcher says so on stderr and runs unlogged.
+
+Only runs **through the launcher** are logged. The same command invoked as
+`/app:cmd` inside a chat has no launcher in the loop and writes nothing.
+
 There is no `--max-turns` in the Claude Code CLI, so a run is bounded by the
 wall clock rather than by a turn count.
 

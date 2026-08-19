@@ -20,6 +20,11 @@ declared `allowed-tools` — never wider.
 stdout is the app's output alone, so it survives a pipe. Everything else goes
 to stderr.
 
+Every run appends to `<app>.log` beside the `.ag` file: the session's own event
+stream verbatim — every tool call, every subagent raised and what it returned —
+between two lines the launcher writes itself. Written as the events arrive, so
+`tail -f` answers what a run is doing while it is still doing it.
+
 Exit: 0 affirmative, 1 negative, 2 usage, 3 refused, 4 app failed,
 5 no verdict (`claude` missing, wall-clock kill, spending cap reached, or a
 session that returned none).
@@ -39,6 +44,9 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import threading
+import time
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -274,7 +282,7 @@ def main(argv):
     grant = cmds[cmd].get("allowed-tools") or ""
     line = " ".join(shlex.quote(a) if re.search(r"\s", a) else a for a in args)
     run = ["claude", "-p", f"/{name}:{cmd} {line}".strip(),
-           "--output-format", "json",
+           "--output-format", "stream-json", "--verbose",
            "--json-schema", json.dumps(SCHEMA),
            "--append-system-prompt", PROTOCOL,
            "--max-budget-usd", f"{opts.max_cost:g}",
@@ -288,16 +296,75 @@ def main(argv):
 
     if shutil.which("claude") is None:
         die("claude is not on PATH", 5)
+
+    # The log is opened before the run and written as each event arrives, because
+    # the question it exists to answer — what is this doing *right now* — is asked
+    # while the run is still going. Named on stderr for the same reason: a
+    # `tail -f` you only hear about afterwards is a post-mortem, not a window.
+    log = ag.with_suffix(".log")
     try:
-        done = subprocess.run(run, capture_output=True, text=True, timeout=opts.timeout)
-    except subprocess.TimeoutExpired:
+        journal = log.open("a", encoding="utf-8", buffering=1)
+    except OSError as exc:
+        journal = None
+        print(f"{PROG}: cannot write {log} ({exc.strerror}) — running unlogged",
+              file=sys.stderr)
+    else:
+        print(f"{PROG}: logging to {log}", file=sys.stderr)
+
+    def record(**fields):
+        """A line the launcher wrote itself, typed so it cannot be mistaken for
+        one of the session's own events."""
+        if journal:
+            journal.write(json.dumps(
+                {"type": "launcher",
+                 **{k: v for k, v in fields.items() if v is not None}}) + "\n")
+
+    began = time.monotonic()
+    record(subtype="run_started", app=name, command=cmd, args=args,
+           at=datetime.now().astimezone().isoformat(timespec="seconds"),
+           cwd=os.getcwd(), plugin_dir=str(root),
+           timeout=opts.timeout, max_cost=opts.max_cost)
+
+    # Streamed rather than captured: `capture_output` hands everything over at
+    # exit, which is the one moment a live log is no longer useful. The wall
+    # clock therefore needs its own watchdog, since nothing here blocks on a
+    # timeout any more.
+    proc = subprocess.Popen(run, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, bufsize=1)
+    errors = []
+    threading.Thread(target=lambda: errors.extend(proc.stderr), daemon=True).start()
+    expired = []
+    watchdog = threading.Timer(opts.timeout,
+                               lambda: (expired.append(True), proc.kill()))
+    watchdog.start()
+    result = {}
+    try:
+        for event_line in proc.stdout:
+            if journal:
+                journal.write(event_line)   # verbatim, so the log replays as a stream
+            try:
+                event = json.loads(event_line)
+            except ValueError:
+                continue
+            if isinstance(event, dict) and event.get("type") == "result":
+                result = event
+    finally:
+        watchdog.cancel()
+        proc.wait()
+
+    def finish(code, status=None, note=None):
+        """Every way out of a run is recorded, including the ways that failed.
+        A log that stops mid-sentence cannot tell a kill from a crash."""
+        record(subtype="run_finished", exit=code, status=status, note=note,
+               cost=result.get("total_cost_usd"),
+               seconds=round(time.monotonic() - began, 1))
+        if journal:
+            journal.close()
+        return code
+
+    if expired:
+        finish(5, note=f"killed at the {opts.timeout}s wall clock")
         die(f"no answer within {opts.timeout}s (raise --timeout)", 5)
-    try:
-        result = json.loads(done.stdout)
-    except ValueError:
-        result = None
-    if not isinstance(result, dict):
-        result = {}
 
     # A run stopped by its cap carries no verdict, so without this it arrives as
     # "the session returned no verdict" — the least informative way to find out
@@ -306,6 +373,7 @@ def main(argv):
     # before each one, so what was actually spent is not what was asked for.
     if result.get("subtype") == "error_max_budget_usd":
         spent = result.get("total_cost_usd")
+        finish(5, note="stopped at the spending cap")
         die(f"stopped at the ${opts.max_cost:g} spending cap"
             + (f", ${spent:.2f} spent" if isinstance(spent, (int, float)) else "")
             + " (raise --max-cost)", 5)
@@ -314,14 +382,16 @@ def main(argv):
         verdict = result["structured_output"]
         status, output = verdict["status"], verdict["output"]
     except (KeyError, TypeError):
-        first = (done.stderr or done.stdout or "").strip().splitlines()[:1]
+        first = "".join(errors).strip().splitlines()[:1]
+        finish(5, note="the session returned no verdict")
         die("the session returned no verdict" + (f": {first[0]}" if first else ""), 5)
 
     # stdout carries the app's output and nothing else, so whatever is on the
     # far end of a pipe sees a program rather than a session.
     if output:
         print(output.rstrip("\n"))
-    return {"ok": 0, "findings": 1, "refused": 3, "error": 4}.get(status, 5)
+    return finish({"ok": 0, "findings": 1, "refused": 3, "error": 4}.get(status, 5),
+                  status)
 
 
 if __name__ == "__main__":

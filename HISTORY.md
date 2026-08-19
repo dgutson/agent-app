@@ -4,6 +4,48 @@
 
 ## 2026-08-19
 
+- **R-027 — every run leaves `<app>.log`, written while it runs.**
+  Every `.ag` invocation now appends beside its own file — `hello.ag` writes `hello.log` —
+  and the path goes to stderr *before* the session starts, so `tail -f` can be aimed at a
+  run that is still going. That was the actual complaint behind both items today: not that
+  a run cost money, but that there was no way to see what it was doing at the time.
+  - **`--output-format stream-json --verbose`, streamed rather than captured.**
+    `capture_output=True` hands everything over at exit, which is the one moment a live log
+    stops being useful, so it is gone — and the wall clock now needs its own watchdog
+    thread, because nothing blocks on a timeout any more. Probed before any of it was built
+    (commit `8b4a03e`): the verdict survives the format change, so `structured_output`, the
+    exit-status mapping and R-026's cap detection needed no change at all. That was the risk
+    that would have doubled the item, and it did not materialise.
+  - **Verbatim, and that was the user's call.** The offered default clipped tool-result
+    bodies at 2 KB; it was rejected once it was established that clipping only shrinks the
+    file on disk — the events arrive either way, so nothing about tokens or cost changes.
+    The log is therefore a faithful copy: file contents, command output, whole subagent
+    prompts. That is what makes it worth having when a run went wrong, and why `*.log` is
+    now gitignored and `ag-format.md` says to treat it as a transcript rather than a build
+    artifact.
+  - **Subagents are answered, not merely mentioned.** `task_started` carries the subagent's
+    type and the entire prompt it was handed, `task_progress` its tokens, tool count and
+    duration, `task_notification` its status and returned summary. Every `assistant`/`user`
+    line carries `parent_tool_use_id`, so a subagent's own tool calls separate from the main
+    agent's even when the two run concurrently.
+  - **Two launcher-authored lines bracket the stream** — `run_started` (app, command, args,
+    cwd, plugin dir, timeout, cap, wall-clock time) and `run_finished` (exit, status, cost,
+    seconds, and the reason when there is one). **Every ending is recorded, including the
+    ones that failed**: a log that simply stops cannot tell a crash from a kill.
+  - **A run is never failed for the sake of its log.** If the file cannot be opened, the
+    launcher says so on stderr and runs unlogged.
+  - **Measured end to end, not by inspection.** A clean `lint`: 19 lines, 24 KB,
+    `exit 0 / status ok / cost $0.194 / 14.9s`. `--timeout 8`: killed mid-run with 11 events
+    already on disk — which is the proof the writes are live rather than flushed at exit —
+    and `note: killed at the 8s wall clock`. `--max-cost 0.0001`: `note: stopped at the
+    spending cap`, `$0.18` recorded. All three appended to one file. Self-lint:
+    `4 entry points, 3 first-party tools`, every check ran, exit 0.
+  - **Left undone deliberately**, and said out loud rather than discovered: no rotation and
+    no size cap, so the file grows; no `--no-log`; no per-event wall-clock stamp, so a saved
+    log says when the run began and how long it took but not when each event landed; and
+    only launcher runs are logged — `/app:cmd` inside a chat has no launcher in the loop,
+    which `ag-format.md` now states instead of implying every invocation is recorded.
+
 - **R-026 — an agent app can be capped in dollars, and says so in its own words.**
   `--max-cost USD` now sits beside `--timeout` in every launched app's `--help`, defaults to
   **$5**, and is forwarded to the session underneath as `--max-budget-usd`. The caller never
