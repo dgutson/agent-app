@@ -21,8 +21,13 @@ stdout is the app's output alone, so it survives a pipe. Everything else goes
 to stderr.
 
 Exit: 0 affirmative, 1 negative, 2 usage, 3 refused, 4 app failed,
-5 no verdict (`claude` missing, wall-clock kill, or a session that returned
-none). There is no `--max-turns` in this CLI; the bound is the wall clock.
+5 no verdict (`claude` missing, wall-clock kill, spending cap reached, or a
+session that returned none).
+
+Two bounds exist and no more — there is no `--max-turns` in this CLI — and both
+are the launcher's own options, named for what they bound rather than for the
+flag they become. The caller of an agent app is running a program, not a
+session, and never has to know what is underneath it.
 """
 
 import argparse
@@ -41,6 +46,12 @@ import yaml
 PROG = Path(sys.argv[0]).name
 KEYS = {"plugin", "plugin-dir", "default-command", "timeout",
         "description", "epilog"}
+
+# The default spending cap, in dollars, and arbitrary in exactly the way the
+# 900-second timeout is arbitrary: printed in --help, overridable per run. Its
+# job is to make an unattended runaway impossible, not to be a per-app budget —
+# an app that legitimately costs more says so with --max-cost.
+CAP = 5.0
 
 # Printed under the commands unless the .ag file replaces it. It is here
 # rather than in an error message because the rule is worth knowing before
@@ -220,13 +231,17 @@ def main(argv):
     cli.add_argument("--help", "-h", action="store_true", dest="help",
                      help="this, or a command's own usage")
     cli.add_argument("--dry-run", action="store_true",
-                     help="print the resolved claude command and stop")
+                     help="print the resolved command and stop")
     cli.add_argument("--timeout", type=int, default=seconds, metavar="SEC",
                      help=f"wall clock for the run (default {seconds})")
+    cli.add_argument("--max-cost", type=float, default=CAP, metavar="USD",
+                     help=f"spending cap for the run (default {CAP:g})")
     cli.add_argument("command", nargs="?", help="one of the commands below")
     cli.add_argument("args", nargs=argparse.REMAINDER,
                      help="passed to the app untouched")
     opts = cli.parse_args(app_args(cli, argv[1:], default))
+    if opts.max_cost <= 0:
+        die(f"--max-cost wants a positive number of dollars, not {opts.max_cost:g}")
     args = [a for a in opts.args if a not in ("--help", "-h")]
     want_help = opts.help or len(args) != len(opts.args)
 
@@ -262,6 +277,7 @@ def main(argv):
            "--output-format", "json",
            "--json-schema", json.dumps(SCHEMA),
            "--append-system-prompt", PROTOCOL,
+           "--max-budget-usd", f"{opts.max_cost:g}",
            "--plugin-dir", str(root)]
     if grant:
         run += ["--allowed-tools",
@@ -277,9 +293,27 @@ def main(argv):
     except subprocess.TimeoutExpired:
         die(f"no answer within {opts.timeout}s (raise --timeout)", 5)
     try:
-        verdict = json.loads(done.stdout)["structured_output"]
+        result = json.loads(done.stdout)
+    except ValueError:
+        result = None
+    if not isinstance(result, dict):
+        result = {}
+
+    # A run stopped by its cap carries no verdict, so without this it arrives as
+    # "the session returned no verdict" — the least informative way to find out
+    # you hit your own ceiling. Measured: `subtype` names it outright, and the
+    # spend is reported because the cap is checked between steps rather than
+    # before each one, so what was actually spent is not what was asked for.
+    if result.get("subtype") == "error_max_budget_usd":
+        spent = result.get("total_cost_usd")
+        die(f"stopped at the ${opts.max_cost:g} spending cap"
+            + (f", ${spent:.2f} spent" if isinstance(spent, (int, float)) else "")
+            + " (raise --max-cost)", 5)
+
+    try:
+        verdict = result["structured_output"]
         status, output = verdict["status"], verdict["output"]
-    except (ValueError, KeyError, TypeError):
+    except (KeyError, TypeError):
         first = (done.stderr or done.stdout or "").strip().splitlines()[:1]
         die("the session returned no verdict" + (f": {first[0]}" if first else ""), 5)
 

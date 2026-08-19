@@ -2,7 +2,78 @@
 
 > Completed roadmap items, newest first.
 
+## 2026-08-19
+
+- **R-026 — an agent app can be capped in dollars, and says so in its own words.**
+  `--max-cost USD` now sits beside `--timeout` in every launched app's `--help`, defaults to
+  **$5**, and is forwarded to the session underneath as `--max-budget-usd`. The caller never
+  types that name. An agent app is a program, so both of its bounds are spelled for what
+  they bound rather than for the flag they become — and `--dry-run`'s help line lost the word
+  "claude" for the same reason.
+  - **A default, not merely an option.** The item left this open and it is the decision that
+    matters: an option you have to remember is no protection on the run where you forget it,
+    which is the run that raised this. $5 is arbitrary in exactly the way the 900-second
+    timeout is arbitrary — printed in `--help`, overridable per run — and its job is to make
+    an unattended runaway impossible, not to be a per-app budget.
+  - **A capped run had to stop looking like a broken one.** Measured: budget exhaustion
+    returns `"subtype": "error_max_budget_usd"` and **no `structured_output`**, so before
+    this it fell into the generic *no verdict* branch with nothing to say why. It still exits
+    **5** — the wall-clock kill's neighbour, and the same "this run reached no conclusion"
+    that already means — but now names both numbers:
+    `stopped at the $5 spending cap, $5.02 spent (raise --max-cost)`.
+  - **It stops a runaway; it is not an exact ceiling, and the docs say so.** Measured:
+    `--max-cost 0.0001` against this repository's own `lint` halted having spent **$0.35**,
+    because the cap is checked between steps rather than before each one. Overshoot that
+    somebody discovers from a bill is worse than overshoot that was written down.
+  - **No `.ag` key, deliberately.** The file carries a `timeout` default and now visibly
+    lacks the cost one. That asymmetry is R-024's third key and stays there, where the
+    question is a per-app default rather than a bound that exists at all.
+  - **Verified end to end**, not by inspection: `--help` renders the option, `--dry-run`
+    shows the forwarded flag, `--max-cost 0` is a usage error (exit 2), a capped run exits 5
+    with the message above, and an uncapped `lint` still returns its verdict and exits 0.
+    Self-lint: `4 entry points, 3 first-party tools`, every check ran, exit 0.
+
 ## 2026-08-16
+
+- **R-008 — the lint's findings now survive the run that produced them.**
+  `lint_agent_app.py --emit [PATH]` writes the payload `--json` prints to a file, so a
+  later step can act on the analysis instead of paying for a second one. Defaults to
+  `.agent-app-findings.json` in the inspected root; a directory argument gets that name
+  inside it. `/agent-app:lint` now runs `--json --emit` and its report is unchanged, plus
+  one line saying where the file went — a file appearing in someone's repository
+  unannounced is a surprise, however defensible. Still no `Edit` and no `Write` on that
+  command: the script writes its own output through `Bash`, which is the rule the
+  SKILL.md already stated and this is the first thing to need it.
+  - **The file carries what it takes to distrust it.** A `provenance` block records every
+    file the run read with a content digest, one `tree_hash` over the set, and the `only`
+    and `wide` flags in force — the last because a payload emitted under `--only unread`
+    holds one check's findings and otherwise reads exactly like a clean run of all of
+    them. `--json` deliberately carries no such block: a session reading stdout has no
+    staleness question, because the run it is reading just happened.
+  - **The read set is wider than "prose and source", and that was the substantive
+    decision.** `.agent-app-allow` and `.claude-plugin/plugin.json` are hashed too. An
+    allow line retires a finding and the manifest's `name` decides a command's slug, so a
+    check that ignored them would report *current* after exactly the edits most likely to
+    have invalidated the file.
+  - **Staleness is answered by the tool, not eyeballed.** `--check-emit [PATH]` re-hashes
+    and exits `0` current / `3` stale / `2` unusable, naming the paths that `changed`,
+    were `added` or were `removed`. Comparing hashes is determinable, so by this plugin's
+    own first question it could not be left to prose. `unusable` covers absent,
+    unparseable, foreign, and unknown-`format` alike — all four mean "you do not have
+    findings yet" — and a `format` newer than this build says so, naming the linter as
+    the old half rather than inviting a pointless re-emit.
+  - **The self-lint caught the first draft.** `AA501`: the new exit statuses were hidden
+    in a `{"current": 0, "stale": 3}.get(...)` lookup, so the prose documented an exit 3
+    that nothing could be seen to raise — the `AA502` defect this linter reports in other
+    people's tools. Rewritten as three explicit `return`s. Self-lint: `4 entry points,
+    3 first-party tools`, every check ran, exit 0.
+  - **Left as it is:** `--check-emit` matches on repo-relative paths and does not care
+    that the recorded `root` differs, so a payload emitted in one checkout is answerable
+    in another. That is what lets CI emit in one job and consume in the next.
+
+- **R-010 lowered to Later**, at the user's call and with a line in the item saying so.
+  It makes `/agent-app:agent-app` legible; everything it was competing with in **Now**
+  changes what the plugin does.
 
 - **`/agent-app:create` now finishes with a directory, and asks before it builds.**
   Not a roadmap item — the user pointed out that `create` was producing a design rather

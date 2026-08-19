@@ -7,85 +7,74 @@
 > entries are no longer present in this file.
 
 Format: 1
-Next ID: R-026
+Next ID: R-028
 
 ---
 
 ## Now
 
-### R-010 — Say plainly that `/agent-app:agent-app` is not a command
+### R-027 — Every run leaves a log: `<app>.log`
 
-- **Category:** Scaffolding
-- **What:** **No rename, and no deletion.** The entry stays and the plugin explains it.
-  The README half is written (see *The last entry is not a command*, renamed from
-  *The fourth entry…* when R-023 made the plugin's fourth command); two changes
-  remain, both inside the plugin so they ship with it rather than needing per-machine
-  setup:
-  1. **Front-load the skill's `description`** with what the entry is — "Internal rulebook
-     for the agent-app plugin; not a command — use `/agent-app:create`, `:update-ag`,
-     `:lint` or `:partition`" — and keep the existing trigger phrases after it. The completion list
-     shows the description beside the slug, so this is the only text that reaches
-     somebody at the moment they are typing `/agent-app:`. Do not gut the trigger
-     phrases: the same field routes automatic invocation, and losing it would stop the
-     skill firing on "should this be a script or prose?" with no command typed.
-  2. **Make direct invocation a signpost, not a manual dump.** First instruction in the
-     body: if invoked with no task attached, name the four commands and stop.
-- **Why:** `/agent-app:agent-app` reads as a typo, and the user never needs to type it —
-  it is the rulebook the four commands share, surfaced as an entry only because Claude
-  Code makes every skill invocable as `/<plugin>:<skill>`. Three fixes were investigated
-  and rejected; record the findings so nobody re-opens them:
+- **Category:** Observability
+- **What:** Make the launcher write one log per app, named for the app — `hello.ag` →
+  `hello.log` — recording what a run did *while it is doing it*: the command and arguments
+  it started from, each tool call the main agent made, **each subagent raised and what it
+  returned**, the verdict, and the run's duration and cost. The launcher owns this, not each
+  app: twenty apps that each implement logging in their own prose is twenty log formats that
+  disagree, which is the drift this plugin exists to catch.
 
-  **Renaming** was the original proposal and is explicitly not wanted. A better word
-  still reads as one more command, which is the actual confusion — the problem is not the
-  name, it is that the entry is not a command at all.
+  What has to be settled, in the order that matters:
+  - **The launcher cannot see any of this today, and that is the work.** It runs
+    `claude -p --output-format json` with `capture_output=True`
+    (`launcher/agent-app-launcher:261-276`) — one summary blob, at the end, nothing in
+    between. `--output-format stream-json` is the candidate channel, but measure two things
+    before building on it: that the stream really carries tool calls and subagent activity
+    rather than only assistant text, and that it **still ends in a result carrying
+    `structured_output`**, because the launcher's whole verdict-and-exit-status protocol
+    hangs off that one field. If the second is false, the log and the verdict need two
+    channels and this item is larger than it looks.
+  - **Written as it goes, not at the end.** The complaint that raised this was *"I didn't
+    know what it was doing"* — present tense, during the run. A log flushed after the process
+    exits does not answer it. `tail -f` working on a run in flight is the requirement, and it
+    is what rules out buffering the stream.
+  - **Where it goes, and whether it is announced.** Beside the `.ag` file, in the caller's
+    working directory, or under `$XDG_STATE_HOME`. This collides with the `cwd:` question
+    R-024 still holds: a log written to the caller's directory lands somewhere different
+    each run, which is the worst of the three for an audit trail. Settle append versus
+    truncate (auditability says append; append means deciding a size cap), and whether a
+    `log:` key may move or silence it. The precedent is already set — `--emit` says where its
+    file went because "a file appearing in someone's repository unannounced is a surprise"
+    (HISTORY 2026-08-16) — so either say it, or make it opt-in.
+  - **What must not be written down.** A verbatim event log contains every tool result the
+    session saw: file contents, command output, whatever the environment held. Auditability
+    wants all of it and safety wants less. **Decide the rule before building**, because the
+    alternative is discovering it by finding a credential in a log file.
+  - **Machine-readable first.** JSONL of the events as they arrive is greppable, diffable and
+    replayable; a rendered human timeline is a view over that and can come later, or from
+    something else. This plugin's own partition rule points the same way — the file records
+    the determinable facts, and the judgment about what they mean belongs to the reader.
+  - **State the limit honestly.** This covers runs through the launcher. A command invoked as
+    `/app:cmd` inside a chat has no launcher in the loop and gets no log; say so in
+    `launcher/ag-format.md` rather than implying every invocation is recorded.
+- **Why:** The 2026-08-19 run that also produced R-026: it went long, it cost money, and
+  there was no way to watch it at the time or reconstruct it afterwards. R-026 shipped the
+  same day (see HISTORY.md) and stops the bleeding with `--max-cost`; this is the half that
+  says where it went.
 
-  **Hiding it is not possible in the direction required.** `skillOverrides` in
-  `settings.json`, keyed by skill name, offers `name-only` (lists it without its
-  description), `user-invocable-only` (hides it from the model, keeps the slash command)
-  and `off` (hides it from both). There is no mode that hides it from the user while
-  keeping it loadable by the model, and `off` would break the four commands that load
-  it. It is a user-side setting in any case, so a published plugin cannot ship it. No
-  frontmatter flag does this either: across 46 installed skills on this machine the only
-  keys in use are `name`, `description`, `disable-model-invocation` and `tools`, and
-  `disable-model-invocation` blocks the model while keeping the user's slash command —
-  again the wrong direction.
+  It is also what makes that cap's number choosable. The default is $5 because $5 is a
+  number nobody can be hurt by, not because anybody knows what a run of a given app costs —
+  and nothing on disk records what one cost, so the second-guess is as blind as the first.
 
-  **Deleting the skill** and copying its content into the four command files was
-  rejected earlier: four copies of the partition rules and the evidence contract that
-  can disagree with nothing able to detect it, in a plugin whose entire subject is prose
-  drifting out of agreement with code. It is also not a token saving — today a command
-  loads a short file plus the skill; with copies it loads one long file, at roughly the
-  same cost.
-- **Outcome:** Somebody typing `/agent-app:` can tell from the completion list which
-  entries are commands and which one is the rulebook, and invoking the rulebook directly
-  answers with the command list instead of the doctrine.
+  The gap is real independently of the incident. R-014 deliberately built a way to run agent
+  apps with nobody watching, and then kept only the verdict: every subagent, every tool call
+  and the cost are already produced by the session and already thrown away. This is not new
+  instrumentation, it is not discarding what the process already emits.
+- **Outcome:** Every launcher run leaves `<app>.log`, written as the run proceeds so
+  `tail -f` shows a session in flight, carrying each subagent raised and what it returned,
+  each tool call, the verdict and the run's cost — with written decisions on location,
+  retention, and what is redacted.
 - **Blocked-by:** —
 - **Enables:** —
-
-### R-008 — Persist lint findings so the fix step need not re-run the lint
-
-- **Category:** Commands
-- **What:** Add `--emit <path>` to `lint_agent_app.py`: write the findings payload — the
-  same structure `--json` prints — to a file, alongside a content hash of every prose
-  and source file the run read, so a consumer can tell whether the findings still
-  describe the tree. Default the path to the inspected root, since that is where the
-  user will look for it. `/agent-app:lint` keeps printing the human report to the
-  console exactly as now; the file is the machine channel, the console is the human one.
-  **The agent still gets no `Edit` or `Write`** — the script writes its own output when
-  invoked through `Bash`, the way `checkchat --emit` already does.
-- **Why:** `/agent-app:lint` and the fix step would otherwise each run the linter and
-  each pull the full finding set into context — the second time for no new information.
-  On `update-tools` that is 18 findings plus a coverage block, paid twice, and the two
-  disagree whenever the tree moves between them. The read-only rule is not violated by
-  this, because that rule protects **the agent app under inspection** — its SKILL.md,
-  its commands, its scripts, its `.agent-app-allow` — and not the filesystem in general.
-  A generated findings file is output, not a modification of anyone's source; whether it
-  gets committed or gitignored is the user's call.
-- **Outcome:** The fix step obtains the findings without re-running the analysis and can
-  detect that they are stale before acting. `/agent-app:lint` still cannot alter the app
-  it inspects.
-- **Blocked-by:** —
-- **Enables:** R-007
 
 ### R-007 — `/agent-app:fix-findings` command
 
@@ -107,7 +96,7 @@ Next ID: R-026
   just have to be asked for.
 - **Outcome:** Applying lint findings is possible in one command, and impossible without
   explicitly invoking it.
-- **Blocked-by:** R-008
+- **Blocked-by:** —
 - **Enables:** —
 
 ### R-003 — Conformance marker: an artifact that declares it is an agent app
@@ -204,7 +193,11 @@ Next ID: R-026
   - **`max-cost:`** — maps to `--max-budget-usd`. Measured during R-014: there
     is **no `--max-turns`** in this CLI, so wall clock and dollars are the only
     two bounds that exist, and the file already carries `timeout`. That makes
-    this the natural sibling of a key that is already there.
+    this the natural sibling of a key that is already there. **The command-line
+    flag shipped on 2026-08-19 as R-026 (see HISTORY.md) — `--max-cost`, default
+    $5. What is left here is only the question of a per-app default living in
+    the file, which generalises past cost to `timeout` and to whatever else the
+    file should carry defaults for.**
 - **Why:** All three were raised while the format was being written and none was
   needed to make it work, so shipping them would have been speculative. They are
   recorded here rather than in the format spec because an undecided key is not a
@@ -565,6 +558,57 @@ Next ID: R-026
 - **Enables:** —
 
 ## Later
+
+### R-010 — Say plainly that `/agent-app:agent-app` is not a command
+
+- **Category:** Scaffolding
+- **What:** **Moved out of Now on 2026-08-16, at the user's call** — the entry
+  is confusing, not broken, and everything it competed with changes what the
+  plugin does. **No rename, and no deletion.** The entry stays and the plugin
+  explains it. The README half is written (see *The last entry is not a command*,
+  renamed from *The fourth entry…* when R-023 made the plugin's fourth command);
+  two changes remain, both inside the plugin so they ship with it rather than
+  needing per-machine setup:
+  1. **Front-load the skill's `description`** with what the entry is — "Internal rulebook
+     for the agent-app plugin; not a command — use `/agent-app:create`, `:update-ag`,
+     `:lint` or `:partition`" — and keep the existing trigger phrases after it. The completion list
+     shows the description beside the slug, so this is the only text that reaches
+     somebody at the moment they are typing `/agent-app:`. Do not gut the trigger
+     phrases: the same field routes automatic invocation, and losing it would stop the
+     skill firing on "should this be a script or prose?" with no command typed.
+  2. **Make direct invocation a signpost, not a manual dump.** First instruction in the
+     body: if invoked with no task attached, name the four commands and stop.
+- **Why:** `/agent-app:agent-app` reads as a typo, and the user never needs to type it —
+  it is the rulebook the four commands share, surfaced as an entry only because Claude
+  Code makes every skill invocable as `/<plugin>:<skill>`. Three fixes were investigated
+  and rejected; record the findings so nobody re-opens them:
+
+  **Renaming** was the original proposal and is explicitly not wanted. A better word
+  still reads as one more command, which is the actual confusion — the problem is not the
+  name, it is that the entry is not a command at all.
+
+  **Hiding it is not possible in the direction required.** `skillOverrides` in
+  `settings.json`, keyed by skill name, offers `name-only` (lists it without its
+  description), `user-invocable-only` (hides it from the model, keeps the slash command)
+  and `off` (hides it from both). There is no mode that hides it from the user while
+  keeping it loadable by the model, and `off` would break the four commands that load
+  it. It is a user-side setting in any case, so a published plugin cannot ship it. No
+  frontmatter flag does this either: across 46 installed skills on this machine the only
+  keys in use are `name`, `description`, `disable-model-invocation` and `tools`, and
+  `disable-model-invocation` blocks the model while keeping the user's slash command —
+  again the wrong direction.
+
+  **Deleting the skill** and copying its content into the four command files was
+  rejected earlier: four copies of the partition rules and the evidence contract that
+  can disagree with nothing able to detect it, in a plugin whose entire subject is prose
+  drifting out of agreement with code. It is also not a token saving — today a command
+  loads a short file plus the skill; with copies it loads one long file, at roughly the
+  same cost.
+- **Outcome:** Somebody typing `/agent-app:` can tell from the completion list which
+  entries are commands and which one is the rulebook, and invoking the rulebook directly
+  answers with the command list instead of the doctrine.
+- **Blocked-by:** —
+- **Enables:** —
 
 ### R-001 — `/agent-app:list-installed` command
 

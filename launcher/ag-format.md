@@ -93,8 +93,9 @@ $ ./report.ag --timeout 300 --output x      # --timeout is the launcher's; --out
 
 The launcher's own options still bind first and still win, which is the cost:
 with no command named, an app flag spelled like a launcher flag (`--timeout`,
-`--dry-run`) is taken by the launcher. Name the command — `./report.ag report
---timeout 5` — and every argument after it belongs to the app again, as always.
+`--max-cost`, `--dry-run`) is taken by the launcher. Name the command —
+`./report.ag report --timeout 5` — and every argument after it belongs to the
+app again, as always.
 
 **Without a `default-command`, none of this applies** and an unknown leading
 flag is a usage error, as before. This is opt-in for the same reason the
@@ -113,13 +114,34 @@ exception and is honoured on either side.
 | Option | |
 |---|---|
 | `--help`, `-h` | The app's commands, or one command's usage. Answered from the declaration with **no model started at all** — `claude` is not even looked up. |
-| `--dry-run` | Print the resolved `claude` command line and stop. |
+| `--dry-run` | Print the resolved command line and stop. |
 | `--timeout SEC` | Override the file's `timeout`. |
+| `--max-cost USD` | Cap what the run may spend. Default 5. |
 
 The help is rendered by `argparse` from the options themselves, so the options
 section cannot drift out of agreement with the options that exist — which is
 the failure this repository is about. Only the command list, the `description`
 and the `epilog` are supplied.
+
+**Both bounds are the launcher's own options, named for what they bound.** They
+become flags of the program underneath, but the caller of an agent app is
+running a program rather than a session and is never asked to know that: no
+option here is spelled the way the thing under it spells the same idea.
+
+Two things about `--max-cost` that are measured rather than assumed:
+
+- **It stops a runaway; it is not an exact ceiling.** The cap is checked between
+  steps, not before each one, so the spend can pass it before the run halts — a
+  `--max-cost 0.0001` run on this repository stopped having spent $0.35. Set it
+  where a runaway would hurt, not where a budget sits.
+- **Hitting it is exit 5, with the cap and the spend named** —
+  `stopped at the $5 spending cap, $5.02 spent (raise --max-cost)`. A capped run
+  returns no verdict, so without that it would arrive as the generic *no verdict*,
+  which is the least informative way to learn you hit your own ceiling.
+
+There is no `.ag` key for the cap yet: the file carries a `timeout` default and
+not a cost one. Until it does, an app that legitimately costs more than the
+default says so per invocation.
 
 ## Exit status
 
@@ -135,7 +157,7 @@ trusting prose to remember it, and maps it to an integer:
 | 2 | — | Usage error: bad `.ag` file, unknown command, unknown option. Settled without a model. |
 | 3 | `refused` | The app declined; something a safe answer depends on could not be established, and nothing was changed. |
 | 4 | `error` | The app ran and failed. |
-| 5 | — | No verdict: `claude` missing, a wall-clock kill, or a session that completed without one. |
+| 5 | — | No verdict: a wall-clock kill, the spending cap reached, a session that completed without one, or `claude` not on `PATH`. |
 
 `status` is a claim about the app's *subject*, not about whether the model
 answered: an app that ran correctly and found problems is `findings`, never
@@ -177,21 +199,23 @@ missing and refuse.
 
 ```console
 $ ./hello.ag --help
-usage: hello.ag [--help] [--dry-run] [--timeout SEC] [command] ...
+usage: hello.ag [--help] [--dry-run] [--timeout SEC] [--max-cost USD]
+                [command] ...
 
 Greet somebody by name, from a shell or a script.
 
 positional arguments:
-  command        one of the commands below
-  args           passed to the app untouched
+  command         one of the commands below
+  args            passed to the app untouched
 
 options:
-  --help, -h     this, or a command's own usage
-  --dry-run      print the resolved claude command and stop
-  --timeout SEC  wall clock for the run (default 900)
+  --help, -h      this, or a command's own usage
+  --dry-run       print the resolved command and stop
+  --timeout SEC   wall clock for the run (default 900)
+  --max-cost USD  spending cap for the run (default 5)
 
 commands:
-  greet  Greet somebody by name  (default)
+  greet  Greet somebody by name.  (default)
 
 Options bind before the command. After it, every argument belongs to the app,
 including flags of these same names.
