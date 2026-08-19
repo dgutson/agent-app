@@ -24,19 +24,30 @@ Next ID: R-028
   disagree, which is the drift this plugin exists to catch.
 
   What has to be settled, in the order that matters:
-  - **The launcher cannot see any of this today, and that is the work.** It runs
-    `claude -p --output-format json` with `capture_output=True`
-    (`launcher/agent-app-launcher:261-276`) — one summary blob, at the end, nothing in
-    between. `--output-format stream-json` is the candidate channel, but measure two things
-    before building on it: that the stream really carries tool calls and subagent activity
-    rather than only assistant text, and that it **still ends in a result carrying
-    `structured_output`**, because the launcher's whole verdict-and-exit-status protocol
-    hangs off that one field. If the second is false, the log and the verdict need two
-    channels and this item is larger than it looks.
-  - **Written as it goes, not at the end.** The complaint that raised this was *"I didn't
-    know what it was doing"* — present tense, during the run. A log flushed after the process
-    exits does not answer it. `tail -f` working on a run in flight is the requirement, and it
-    is what rules out buffering the stream.
+  - **The channel is settled: `--output-format stream-json --verbose`.** The launcher today
+    runs `--output-format json` with `capture_output=True`
+    (`launcher/agent-app-launcher:277,292`) — one summary blob at the end and nothing in
+    between, which is why nobody could watch the run that raised this. Probed 2026-08-19
+    against a session that raised a subagent and shelled out alongside it; every question
+    this item held open came back yes:
+    - **The verdict survives.** The final `result` event still carries `structured_output`,
+      and `total_cost_usd` with it, so the exit-status protocol — and R-026's cap
+      detection — works unchanged. No second channel. This was the risk that would have
+      made the item large, and it did not materialise.
+    - **Subagents are attributable, not merely visible.** Every `assistant`/`user` event
+      carries `parent_tool_use_id`: null for the main agent, the `Agent` tool_use id for
+      that subagent's own work, so concurrent interleaved work separates cleanly.
+    - **There are dedicated lifecycle events**, richer than raised-and-returned:
+      `task_started` (task_id, `subagent_type`, description, and the full prompt handed
+      over), `task_progress` (`total_tokens`, `tool_uses`, `duration_ms`, `last_tool_name`),
+      `task_updated` (status, end_time), `task_notification` (status, `output_file`, and a
+      summary of what came back). Per-subagent token usage therefore comes for free.
+    - **`--verbose` is required** alongside `-p --output-format stream-json`.
+  - **Written as it goes — confirmed, not assumed.** The complaint that raised this was
+    *"I didn't know what it was doing"*, present tense, so a log flushed at exit does not
+    answer it. Probe events arrived incrementally across 19s and flushed line by line, so
+    `tail -f` on a run in flight works. Buffering the stream is what would break it, which
+    means `capture_output=True` has to go.
   - **Where it goes, and whether it is announced.** Beside the `.ag` file, in the caller's
     working directory, or under `$XDG_STATE_HOME`. This collides with the `cwd:` question
     R-024 still holds: a log written to the caller's directory lands somewhere different
@@ -45,14 +56,23 @@ Next ID: R-028
     `log:` key may move or silence it. The precedent is already set — `--emit` says where its
     file went because "a file appearing in someone's repository unannounced is a surprise"
     (HISTORY 2026-08-16) — so either say it, or make it opt-in.
-  - **What must not be written down.** A verbatim event log contains every tool result the
-    session saw: file contents, command output, whatever the environment held. Auditability
-    wants all of it and safety wants less. **Decide the rule before building**, because the
-    alternative is discovering it by finding a credential in a log file.
+  - **What must not be written down — and the probe made this sharper, not easier.**
+    Confirmed 2026-08-19: `tool_result` blocks carry command output and file contents in
+    full, and `task_started` carries the entire prompt a subagent was handed. So a verbatim
+    log is a verbatim copy of everything the session read, which is exactly what makes it
+    useful for debugging and exactly what makes it a liability. Auditability wants all of
+    it, safety wants less. **Decide the rule before building**, because the alternative is
+    discovering it by finding a credential in a log file.
+  - **Size is a real decision, not a theoretical one.** Measured: **27 events, 27 KB** for a
+    19-second run that read two files. A 900-second run — the default timeout — reading a
+    repository is orders of magnitude larger, so append-forever needs a cap, and truncation
+    needs to be defensible against the audit claim.
   - **Machine-readable first.** JSONL of the events as they arrive is greppable, diffable and
     replayable; a rendered human timeline is a view over that and can come later, or from
     something else. This plugin's own partition rule points the same way — the file records
     the determinable facts, and the judgment about what they mean belongs to the reader.
+    Note the events arrive as JSONL already, so "log the stream" and "log JSONL" are the
+    same decision.
   - **State the limit honestly.** This covers runs through the launcher. A command invoked as
     `/app:cmd` inside a chat has no launcher in the loop and gets no log; say so in
     `launcher/ag-format.md` rather than implying every invocation is recorded.
